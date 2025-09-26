@@ -150,6 +150,16 @@ export default {
       logger.child({ module: "PythPriceListener" }),
     );
 
+    // Start the price listener and wait for first update
+    await pythListener.start();
+    const receivedUpdate = await pythListener.waitForFirstPriceUpdate(15000);
+    
+    if (receivedUpdate) {
+      console.log('Price update received!');
+    } else {
+      console.log('Timeout waiting for price update');
+    }
+
     const client = await createClient(endpoint, mnemonic);
     const pythContract = createPythContract(client, pythContractAddress);
 

@@ -193,6 +193,8 @@ export class EvmPricePusher implements IPricePusher {
         await (this.customGasStation?.getCustomGasPrice() ??
           this.client.getGasPrice()),
       );
+    
+    this.logger.debug(`Initial gas price: ${gasPrice} gwei`);
 
     // Try to re-use the same nonce and increase the gas if the last tx is not landed yet.
     if (this.pusherAddress === undefined) {
@@ -227,7 +229,7 @@ export class EvmPricePusher implements IPricePusher {
 
     const txNonce = lastExecutedNonce + 1;
 
-    this.logger.debug(`Using gas price: ${gasPrice} and nonce: ${txNonce}`);
+    this.logger.debug(`Final gas price: ${gasPrice} gwei, nonce: ${txNonce}, update fee: ${updateFee} wei`);
 
     const pubTimesToPushParam = pubTimesToPush.map((pubTime) =>
       BigInt(pubTime),
@@ -242,6 +244,12 @@ export class EvmPricePusher implements IPricePusher {
     };
 
     try {
+      const gasLimitToUse = this.gasLimit !== undefined
+        ? BigInt(Math.ceil(this.gasLimit))
+        : BigInt(1000000); // Default gas limit of 1M gas units
+      
+      this.logger.debug(`Using gas limit: ${gasLimitToUse}, gas price: ${gasPrice}, update fee: ${updateFee}`);
+      
       const { request } =
         await this.pythContract.simulate.updatePriceFeedsIfNecessary(
           [priceFeedUpdateDataWith0x, priceIdsWith0x, pubTimesToPushParam],
@@ -249,10 +257,7 @@ export class EvmPricePusher implements IPricePusher {
             value: updateFee,
             gasPrice: BigInt(Math.ceil(gasPrice)),
             nonce: txNonce,
-            gas:
-              this.gasLimit !== undefined
-                ? BigInt(Math.ceil(this.gasLimit))
-                : undefined,
+            gas: gasLimitToUse,
           },
         );
 

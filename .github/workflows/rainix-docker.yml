@@ -45,7 +45,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - run: |
-          cd ..
-          docker build -t "$TAG_BASE:$CHANNEL" --build-arg GIT_SHA=${{ github.sha }} --build-arg DOCKER_CHANNEL=$CHANNEL -f pyth-crosschain/Dockerfile pyth-crosschain/
+          rm .dockerignore
+          docker build -t "$TAG_BASE:$CHANNEL" --build-arg GIT_SHA=${{ github.sha }} --build-arg DOCKER_CHANNEL=$CHANNEL .
       - run: |
           docker push "$TAG_BASE:$CHANNEL"

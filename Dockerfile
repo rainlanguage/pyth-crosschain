@@ -10,7 +10,7 @@ WORKDIR /price-pusher
 ADD . .
 
 WORKDIR apps/price_pusher
-CMD ["bash", "-c", "npm run start evm \
+CMD ["bash", "-c", "npm run start evm -- \
     --price-config-file ./price-config.stable.sample.yaml \
     --endpoint \"${ENDPOINT}\" \
     --pyth-contract-address \"${PYTH_CONTRACT_ADDRESS}\" \

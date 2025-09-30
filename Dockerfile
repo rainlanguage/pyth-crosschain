@@ -12,9 +12,9 @@ ADD . .
 WORKDIR apps/price_pusher
 CMD ["bash", "-c", "npm run start evm \
     --price-config-file ./price-config.stable.sample.yaml \
-    --endpoint \"{$ENDPOINT}\" \
-    --pyth-contract-address \"{$PYTH_CONTRACT_ADDRESS}\" \
-    --price-service-endpoint \"{$PRICE_SERVICE_ENDPOINT}\" \
+    --endpoint \"$ENDPOINT\" \
+    --pyth-contract-address \"$PYTH_CONTRACT_ADDRESS\" \
+    --price-service-endpoint \"$PRICE_SERVICE_ENDPOINT\" \
     --mnemonic-file <(echo \"${MNEMONIC}\") \
     --pushing-frequency \"${PUSHING_FREQUENCY:-300}\" \
     --polling-frequency \"${POLLING_FREQUENCY:-5}\" \

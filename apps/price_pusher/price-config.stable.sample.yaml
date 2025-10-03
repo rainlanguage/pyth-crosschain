@@ -62,5 +62,29 @@
   early_update:
     time_difference: 150
     price_deviation: 0.03
+- alias: MSTR/USD
+  id: e1e80251e5f5184f2195008382538e847fafc36f751896889dd3d1b1f6111f09
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: BRKB/USD
+  id: e21c688b7fc65b4606a50f3635f466f6986db129bf16979875d160f9c508e8c7
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: SPLG/USD
+  id: 4dfbf28d72ab41a878afcd4c6d5e9593dca7cf65a0da739cbad9b7414004f82d
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
 
 

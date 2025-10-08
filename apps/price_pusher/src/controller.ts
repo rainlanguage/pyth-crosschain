@@ -4,10 +4,12 @@ import { IPriceListener, IPricePusher } from "./interface";
 import { PriceConfig, shouldUpdate, UpdateCondition } from "./price-config";
 import { Logger } from "pino";
 import { PricePusherMetrics } from "./metrics";
+import { AdaptiveMarketDetector, AdaptiveMarketConfig, DEFAULT_ADAPTIVE_CONFIG } from "./adaptive-market-detector";
 
 export class Controller {
   private pushingFrequency: DurationInSeconds;
   private metrics?: PricePusherMetrics;
+  private adaptiveMarketDetector: AdaptiveMarketDetector;
 
   constructor(
     private priceConfigs: PriceConfig[],
@@ -18,10 +20,17 @@ export class Controller {
     config: {
       pushingFrequency: DurationInSeconds;
       metrics?: PricePusherMetrics;
+      adaptiveMarketConfig?: AdaptiveMarketConfig;
     },
   ) {
     this.pushingFrequency = config.pushingFrequency;
     this.metrics = config.metrics;
+
+    // Initialize adaptive market detector
+    this.adaptiveMarketDetector = new AdaptiveMarketDetector(
+      config.adaptiveMarketConfig || DEFAULT_ADAPTIVE_CONFIG,
+      this.logger.child({ module: "AdaptiveMarketDetector" })
+    );
 
     // Set the number of price feeds if metrics are enabled
     this.metrics?.setPriceFeedsTotal(this.priceConfigs.length);
@@ -38,6 +47,42 @@ export class Controller {
     await sleep(this.pushingFrequency * 1000);
 
     for (;;) {
+      // First, detect market activity by checking if we have fresh prices from source
+      for (const priceConfig of this.priceConfigs) {
+        const sourceLatestPrice = this.sourcePriceListener.getLatestPriceInfo(priceConfig.id);
+        if (sourceLatestPrice) {
+          this.adaptiveMarketDetector.detectMarketActivity(sourceLatestPrice.publishTime);
+          break; // Only need to check one price to detect market activity
+        }
+      }
+
+      // Check if we should push prices based on adaptive market detection
+      if (!this.adaptiveMarketDetector.shouldPushPrices()) {
+        const status = this.adaptiveMarketDetector.getMarketStatus();
+        const timeUntilNextOpen = this.adaptiveMarketDetector.getTimeUntilNextPotentialOpen();
+        const hoursUntilNextOpen = Math.ceil(timeUntilNextOpen / (1000 * 60 * 60));
+        
+        this.logger.info({ 
+          status, 
+          timeUntilNextOpen, 
+          hoursUntilNextOpen 
+        }, "Market detection status");
+        
+        if (status.lastUpdateTime) {
+          this.logger.info(
+            `Market appears closed. Last update: ${status.lastUpdateTime.toISOString()} ` +
+            `(${status.timeSinceLastUpdate?.toFixed(1)} minutes ago). ` +
+            `Next potential open in ~${hoursUntilNextOpen} hours.`
+          );
+        } else {
+          this.logger.info("No price updates recorded yet, waiting for market activity...");
+        }
+        
+        // Sleep for a shorter duration when market is closed to check more frequently
+        await sleep(Math.min(this.pushingFrequency * 1000, 5 * 60 * 1000)); // Max 5 minutes
+        continue;
+      }
+
       // We will push all prices whose update condition is YES or EARLY as long as there is
       // at least one YES.
       let pushThresholdMet = false;
@@ -112,6 +157,9 @@ export class Controller {
             priceIds,
             pubTimesToPush,
           );
+
+          // Record successful price update for adaptive market detection
+          this.adaptiveMarketDetector.recordPriceUpdate();
 
           // Record successful updates
           if (this.metrics) {

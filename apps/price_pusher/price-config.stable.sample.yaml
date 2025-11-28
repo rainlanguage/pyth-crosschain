@@ -94,3 +94,11 @@
   early_update:
     time_difference: 150
     price_deviation: 0.03
+- alias: COIN/USD
+  id: fee33f2a978bf32dd6b662b65ba8083c6773b494f8401194ec1870c640860245
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03

@@ -190,3 +190,11 @@
   early_update:
     time_difference: 150
     price_deviation: 0.03
+- alias: CRCL/USD
+  id: 92b8527aabe59ea2b12230f7b532769b133ffb118dfbd48ff676f14b273f1365
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03

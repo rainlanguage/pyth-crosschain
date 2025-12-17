@@ -198,3 +198,11 @@
   early_update:
     time_difference: 150
     price_deviation: 0.03
+- alias: PPLT/USD
+  id: 782410278b6c8aa2d437812281526012808404aa14c243f73fb9939eeb88d430
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03

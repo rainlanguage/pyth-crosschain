@@ -198,6 +198,22 @@
   early_update:
     time_difference: 150
     price_deviation: 0.03
+- alias: CRCL/USD.PRE
+  id: b6ce1644a22bb348f89a81696141c1caaca5e7ea83de289a44fba1a9897ca2d6
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: CRCL/USD.POST
+  id: 9bdba52fbb3d588d573928b1e781c6441e446a83c011fed92d8362c5b309ce02
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
 - alias: PPLT/USD
   id: 782410278b6c8aa2d437812281526012808404aa14c243f73fb9939eeb88d430
   time_difference: 300    # pushes if on-chain is >5min behind

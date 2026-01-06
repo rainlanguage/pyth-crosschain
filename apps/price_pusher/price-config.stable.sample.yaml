@@ -214,6 +214,30 @@
   early_update:
     time_difference: 150
     price_deviation: 0.03
+- alias: BMNR/USD
+  id: 54e2e127c93950de5a710100fd1cd387aba1ec8920850efdb05da5fee57d2e32
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: BMNR/USD.PRE
+  id: daea80499153cb48810997522660713648050c15b4e6b83676f0de18fa959e60
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: BMNR/USD.POST
+  id: 3f522db0b88d785cbe5e8db88e0573b3d3aa9061c78900f59334f155018d31c3
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
 - alias: PPLT/USD
   id: 782410278b6c8aa2d437812281526012808404aa14c243f73fb9939eeb88d430
   time_difference: 300    # pushes if on-chain is >5min behind

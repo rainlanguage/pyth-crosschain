@@ -47,21 +47,32 @@
         };
       in {
         devShells.default = pkgs.mkShell {
-          buildInputs = [
-            pkgs.cli
-            pkgs.git
-            pkgs.libusb1
-            pkgs.udev
-            pkgs.nodejs
-            pkgs.pkg-config
-            pkgs.pnpm
-            pkgs.pre-commit
-            pkgs.python3
-            pkgs.python3Packages.distutils
-            pkgs.graphviz
-            pkgs.anchor
-          ];
-        };
+  buildInputs =
+    with pkgs; [
+      cli
+      git
+      nodejs
+      pkg-config
+      pnpm
+      pre-commit
+      python3
+      python3Packages.setuptools
+      graphviz
+      anchor
+    ]
+    # Linux-only deps
+    ++ lib.optionals stdenv.isLinux [
+      udev
+      libusb1
+    ]
+    # macOS deps (no udev; use system frameworks)
+    ++ lib.optionals stdenv.isDarwin [
+      libusb1
+      darwin.apple_sdk.frameworks.IOKit
+      darwin.apple_sdk.frameworks.CoreFoundation
+    ];
+};
+
       }
     )
   );

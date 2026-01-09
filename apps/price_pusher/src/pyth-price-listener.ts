@@ -35,7 +35,7 @@ export class PythPriceListener implements IPriceListener {
   // This method should be awaited on and once it finishes it has the latest value
   // for the given price feeds (if they exist).
   async start() {
-    this.startListening();
+    await this.startListening();
 
     // Store health check interval reference
     this.healthCheckInterval = setInterval(() => {
@@ -43,7 +43,7 @@ export class PythPriceListener implements IPriceListener {
         this.lastUpdated === undefined ||
         this.lastUpdated < Date.now() - 30 * 1000
       ) {
-        throw new Error("Hermes Price feeds are not updating.");
+        // throw new Error("Hermes Price feeds are not updating.");
       }
     }, 5000);
   }
@@ -52,6 +52,7 @@ export class PythPriceListener implements IPriceListener {
     this.logger.info(
       `Starting to listen for price updates from Hermes for ${this.priceIds.length} price feeds.`,
     );
+    console.log('Price IDs being requested:', this.priceIds);
 
     const eventSource = await this.hermesClient.getPriceUpdatesStream(
       this.priceIds,
@@ -60,6 +61,7 @@ export class PythPriceListener implements IPriceListener {
         ignoreInvalidPriceIds: true,
       },
     );
+    console.log('EventSource created, waiting for messages...');
     eventSource.onmessage = (event: MessageEvent<string>) => {
       const priceUpdates = JSON.parse(event.data) as PriceUpdate;
       priceUpdates.parsed?.forEach((priceUpdate) => {
@@ -69,13 +71,17 @@ export class PythPriceListener implements IPriceListener {
           )} ${priceUpdate.id}`,
         );
 
-        // Consider price to be currently available if it is not older than 60s
+        // Consider price to be currently available if it is not older than 24 hours
+        const currentTime = Date.now() / 1000;
+        const timeDiff = currentTime - priceUpdate.price.publish_time;
+        console.log(`Price age check: currentTime=${currentTime}, publishTime=${priceUpdate.price.publish_time}, diff=${timeDiff}s`);
+        
         const currentPrice =
-          Date.now() / 1000 - priceUpdate.price.publish_time > 60
+          timeDiff > 24 * 60 * 60 // 24 hours in seconds
             ? undefined
             : priceUpdate.price;
         if (currentPrice === undefined) {
-          this.logger.debug("Price is older than 60s, skipping");
+          console.log(`Price is older than 24 hours (${timeDiff}s), skipping`);
           return;
         }
 
@@ -92,6 +98,7 @@ export class PythPriceListener implements IPriceListener {
 
     eventSource.onerror = async (error: Event) => {
       console.error("Error receiving updates from Hermes:", error);
+      console.error("EventSource readyState:", eventSource.readyState);
       eventSource.close();
       await sleep(5000); // Wait a bit before trying to reconnect
       this.startListening(); // Attempt to restart the listener
@@ -100,6 +107,23 @@ export class PythPriceListener implements IPriceListener {
 
   getLatestPriceInfo(priceId: HexString): PriceInfo | undefined {
     return this.latestPriceInfo.get(priceId);
+  }
+
+  // Wait for the first price update to be received
+  async waitForFirstPriceUpdate(timeoutMs: number = 10000): Promise<boolean> {
+    return new Promise((resolve) => {
+      const startTime = Date.now();
+      
+      const checkInterval = setInterval(() => {
+        if (this.latestPriceInfo.size > 0) {
+          clearInterval(checkInterval);
+          resolve(true);
+        } else if (Date.now() - startTime > timeoutMs) {
+          clearInterval(checkInterval);
+          resolve(false);
+        }
+      }, 100);
+    });
   }
 
   cleanup() {

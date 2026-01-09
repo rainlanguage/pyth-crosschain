@@ -246,3 +246,11 @@
   early_update:
     time_difference: 150
     price_deviation: 0.03
+- alias: RKLB/USD
+  id: 40589e289317e4fbd997b1a267606e20a1cc7c3e4689f9e5a5992957917816c8
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03

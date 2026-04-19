@@ -254,3 +254,11 @@
   early_update:
     time_difference: 150
     price_deviation: 0.03
+- alias: SGOV/USD
+  id: 8d6a29bb5ed522931d711bb12c4bbf92af986936e52af582032913b5ffcbf4d5
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03

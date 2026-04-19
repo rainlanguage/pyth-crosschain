@@ -51,7 +51,7 @@
     with pkgs; [
       cli
       git
-      nodejs_22
+      nodejs
       pkg-config
       pnpm
       pre-commit

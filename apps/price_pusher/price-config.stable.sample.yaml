@@ -262,3 +262,27 @@
   early_update:
     time_difference: 150
     price_deviation: 0.03
+- alias: QQQM/USD
+  id: 433b196b3b026f46f76b5e901c84c575a7280dcba0f4272edefe0529b599ad64
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: VWO/USD
+  id: 2f91d775954c0c828d4563448d253cf09df218b620825242775d878d1d5956c7
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: ARKK/USD
+  id: b2fe0af6c828efefda3ffda664f919825a535aa28a0f19fc238945c7aff540b1
+  time_difference: 300    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03

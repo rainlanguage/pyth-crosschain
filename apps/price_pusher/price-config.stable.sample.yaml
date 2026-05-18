@@ -286,3 +286,35 @@
   early_update:
     time_difference: 150
     price_deviation: 0.03
+- alias: TSM/USD
+  id: e722560a66e4ab00522ef20a38fa2ba5d1b41f1c5404723ed895d202a7af7cc4
+  time_difference: 240    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: TSM/USD.PRE
+  id: 6ad383437975189ea6ff0efad3de790d34ff36091a5a24c965e5f047a5de45de
+  time_difference: 240    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: TSM/USD.POST
+  id: 763b87165de66edfce13a7c98c13eb781a44b01ff474b61a6155833b12a65ec3
+  time_difference: 240    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: CEG/USD
+  id: a541bc5c4b69961442e45e9198c7cce151ff9c2a1003f620c6d4a9785c77a4d9
+  time_difference: 240    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03

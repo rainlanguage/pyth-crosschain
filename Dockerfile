@@ -5,7 +5,11 @@ ARG GIT_SHA
 ARG DOCKER_CHANNEL
 ENV GIT_COMMIT=$GIT_SHA
 ENV DOCKER_TAG=$DOCKER_CHANNEL
-# Optional Sentry env: SENTRY_DSN, SENTRY_ENVIRONMENT, SENTRY_CAPTURE_SUCCESS_UPDATES (set to "false" to disable).
+# Optional Sentry env: SENTRY_DSN, SENTRY_ENVIRONMENT,
+# SENTRY_CAPTURE_SUCCESS_UPDATES ("false" to disable), SENTRY_PUSH_CYCLE_MONITORING ("false" to disable),
+# SENTRY_MAX_MS_SINCE_ON_CHAIN_SUCCESS (ms, default 125% of PUSHING_FREQUENCY),
+# SENTRY_INTERVAL_WARN_MIN_STALE_SEC (default 240; suppress gap warnings when market idle),
+# SENTRY_INTERVAL_WARN_ALWAYS ("true" to warn even when no feeds were stale).
 
 WORKDIR /price-pusher
 ADD . .

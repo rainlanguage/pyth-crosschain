@@ -11,7 +11,10 @@ import {
   DurationInSeconds,
   removeLeading0x,
 } from "../utils";
-import { capturePriceUpdateSuccess } from "../sentry";
+import {
+  capturePushChunkSkipped,
+  reportOnChainPushSuccess,
+} from "../push-monitoring";
 import { PythAbi } from "./pyth-abi";
 import { Logger } from "pino";
 import {
@@ -170,6 +173,9 @@ export class EvmPricePusher implements IPricePusher {
       ? chunkArray(pubTimesToPush, this.priceIdsProcessChunkSize)
       : [pubTimesToPush];
 
+    let chunksConfirmed = 0;
+    let chunksSkipped = 0;
+
     for (let chunkIndex = 0; chunkIndex < priceIdChunks.length; chunkIndex++) {
       const chunkPriceIds = priceIdChunks[chunkIndex];
       const chunkPubTimes = pubTimeChunks[chunkIndex];
@@ -189,13 +195,25 @@ export class EvmPricePusher implements IPricePusher {
       );
 
       if (txHash !== undefined) {
-        await this.waitForTransactionReceipt(txHash, {
+        const confirmed = await this.waitForTransactionReceipt(txHash, {
           priceIds: chunkPriceIds,
           chunkIndex: chunkIndex + 1,
           totalChunks: priceIdChunks.length,
         });
         this.lastPushAttempt = undefined;
+        if (confirmed) {
+          chunksConfirmed += 1;
+        }
+      } else {
+        chunksSkipped += 1;
       }
+    }
+
+    if (chunksSkipped > 0) {
+      this.logger.warn(
+        { chunksConfirmed, chunksSkipped, totalChunks: priceIdChunks.length },
+        "Some price update chunks were skipped in this cycle.",
+      );
     }
   }
 
@@ -328,6 +346,10 @@ export class EvmPricePusher implements IPricePusher {
           this.logger.info(
             "Simulation reverted because none of the updates are fresh. This is an expected behaviour to save gas. Skipping this push.",
           );
+          capturePushChunkSkipped("no_fresh_update", {
+            priceIds,
+            feedCount: priceIds.length,
+          });
           return undefined;
         }
 
@@ -378,6 +400,10 @@ export class EvmPricePusher implements IPricePusher {
             "The contract function execution failed in simulation. This is an expected behaviour in high frequency or multi-instance setup. " +
               "Please review this error and file an issue if it is a bug. Skipping this push.",
           );
+          capturePushChunkSkipped("simulation_reverted", {
+            priceIds,
+            feedCount: priceIds.length,
+          });
           return undefined;
         }
 
@@ -449,7 +475,7 @@ export class EvmPricePusher implements IPricePusher {
       chunkIndex?: number;
       totalChunks?: number;
     },
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       const receipt = await this.client.waitForTransactionReceipt({
         hash: hash,
@@ -459,7 +485,7 @@ export class EvmPricePusher implements IPricePusher {
         case "success":
           this.logger.debug({ hash, receipt }, "Price update successful");
           this.logger.info({ hash }, "Price update successful");
-          capturePriceUpdateSuccess({
+          reportOnChainPushSuccess({
             hash,
             blockNumber: receipt.blockNumber.toString(),
             gasUsed: receipt.gasUsed.toString(),
@@ -472,16 +498,27 @@ export class EvmPricePusher implements IPricePusher {
                 }
               : {}),
           });
-          break;
+          return true;
         default:
           this.logger.info(
             { hash, receipt },
             "Price update did not succeed or its transaction did not land. " +
               "This is an expected behaviour in high frequency or multi-instance setup.",
           );
+          capturePushChunkSkipped("receipt_not_success", {
+            hash,
+            status: receipt.status,
+            ...context,
+          });
+          return false;
       }
     } catch (err: any) {
       this.logger.warn({ err }, "Failed to get transaction receipt");
+      capturePushChunkSkipped("receipt_wait_failed", {
+        hash,
+        ...context,
+      });
+      return false;
     }
   }
 

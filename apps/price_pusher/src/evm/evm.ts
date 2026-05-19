@@ -7,6 +7,7 @@ import {
 import {
   addLeading0x,
   assertDefined,
+  chunkArray,
   DurationInSeconds,
   removeLeading0x,
 } from "../utils";
@@ -138,6 +139,7 @@ export class EvmPricePusher implements IPricePusher {
     private gasLimit?: number,
     private customGasStation?: CustomGasStation,
     private gasPrice?: number,
+    private priceIdsProcessChunkSize: number = 10,
   ) {}
 
   // The pubTimes are passed here to use the values that triggered the push.
@@ -157,6 +159,46 @@ export class EvmPricePusher implements IPricePusher {
     if (priceIds.length !== pubTimesToPush.length)
       throw new Error("Invalid arguments");
 
+    const useChunking =
+      this.priceIdsProcessChunkSize > 0 &&
+      priceIds.length > this.priceIdsProcessChunkSize;
+    const priceIdChunks = useChunking
+      ? chunkArray(priceIds, this.priceIdsProcessChunkSize)
+      : [priceIds];
+    const pubTimeChunks = useChunking
+      ? chunkArray(pubTimesToPush, this.priceIdsProcessChunkSize)
+      : [pubTimesToPush];
+
+    for (let chunkIndex = 0; chunkIndex < priceIdChunks.length; chunkIndex++) {
+      const chunkPriceIds = priceIdChunks[chunkIndex];
+      const chunkPubTimes = pubTimeChunks[chunkIndex];
+      const waitForReceipt = useChunking && chunkIndex < priceIdChunks.length - 1;
+
+      this.logger.info(
+        {
+          chunkIndex: chunkIndex + 1,
+          totalChunks: priceIdChunks.length,
+          feedCount: chunkPriceIds.length,
+        },
+        "Processing price update chunk.",
+      );
+
+      const txHash = await this.updatePriceFeedChunk(
+        chunkPriceIds,
+        chunkPubTimes,
+      );
+
+      if (txHash !== undefined && waitForReceipt) {
+        await this.waitForTransactionReceipt(txHash);
+        this.lastPushAttempt = undefined;
+      }
+    }
+  }
+
+  private async updatePriceFeedChunk(
+    priceIds: string[],
+    pubTimesToPush: UnixTimestamp[],
+  ): Promise<`0x${string}` | undefined> {
     const priceFeedUpdateData = (await this.getPriceFeedsUpdateData(
       priceIds,
     )) as `0x${string}`[];
@@ -267,7 +309,11 @@ export class EvmPricePusher implements IPricePusher {
 
       this.logger.info({ hash }, "Price update sent");
 
-      this.waitForTransactionReceipt(hash);
+      if (this.priceIdsProcessChunkSize <= 0) {
+        this.waitForTransactionReceipt(hash);
+      }
+
+      return hash;
     } catch (err: any) {
       this.logger.debug({ err }, "Simulating or sending transactions failed.");
 
@@ -282,7 +328,7 @@ export class EvmPricePusher implements IPricePusher {
           this.logger.info(
             "Simulation reverted because none of the updates are fresh. This is an expected behaviour to save gas. Skipping this push.",
           );
-          return;
+          return undefined;
         }
 
         if (err.walk((e) => e instanceof InsufficientFundsError)) {
@@ -308,7 +354,7 @@ export class EvmPricePusher implements IPricePusher {
               "If this keeps happening or transactions are not landing you need to increase the override gas price " +
               "multiplier and the cap to increase the likelihood of the transaction landing on-chain.",
           );
-          return;
+          return undefined;
         }
 
         if (
@@ -322,7 +368,7 @@ export class EvmPricePusher implements IPricePusher {
           this.logger.info(
             "The nonce is incorrect. This is an expected behaviour in high frequency or multi-instance setup. Skipping this push.",
           );
-          return;
+          return undefined;
         }
 
         // Sometimes the contract function execution fails in simulation and this error is thrown.
@@ -332,7 +378,7 @@ export class EvmPricePusher implements IPricePusher {
             "The contract function execution failed in simulation. This is an expected behaviour in high frequency or multi-instance setup. " +
               "Please review this error and file an issue if it is a bug. Skipping this push.",
           );
-          return;
+          return undefined;
         }
 
         // We normally crash on unknown failures but we believe that this type of error is safe to skip. The other reason is that
@@ -343,7 +389,7 @@ export class EvmPricePusher implements IPricePusher {
             "Transaction execution failed. This is an expected behaviour in high frequency or multi-instance setup. " +
               "Please review this error and file an issue if it is a bug. Skipping this push.",
           );
-          return;
+          return undefined;
         }
 
         // The following errors are part of the legacy code and might not work as expected.
@@ -356,7 +402,7 @@ export class EvmPricePusher implements IPricePusher {
           this.logger.info(
             "The nonce is incorrect (are multiple users using this account?). Skipping this push.",
           );
-          return;
+          return undefined;
         }
 
         if (err.message.includes("max fee per gas less than block base fee")) {
@@ -368,7 +414,7 @@ export class EvmPricePusher implements IPricePusher {
             "The transaction failed with error: max fee per gas less than block base fee. " +
               "The fee will be increased in the next push. Skipping this push.",
           );
-          return;
+          return undefined;
         }
 
         if (
@@ -382,7 +428,7 @@ export class EvmPricePusher implements IPricePusher {
           this.logger.error(
             "A transaction with the same nonce has been mined and this one is no longer needed. Skipping this push.",
           );
-          return;
+          return undefined;
         }
       }
 

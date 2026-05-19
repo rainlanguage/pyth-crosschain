@@ -1,3 +1,6 @@
+# Stable equity feeds: time_difference 240s pushes when on-chain is ~4+ min behind Hermes.
+# Run the pusher with pushing-frequency 300 (5 min) and price-ids-process-chunk-size 10 when
+# listing 100+ feeds so each cycle submits several smaller txs instead of one large batch.
 - alias: GOOG/USD
   id: e65ff435be42630439c96396653a342829e877e2aafaeaf1a10d0ee5fd2cf3f2
   time_difference: 240    # pushes if on-chain is >5min behind

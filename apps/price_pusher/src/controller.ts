@@ -94,6 +94,19 @@ export class Controller {
         }
       }
       if (pushThresholdMet) {
+        // When updates are split across multiple on-chain txs, push the most stale feeds first.
+        pricesToPush.sort((a, b) => {
+          const targetA = this.targetPriceListener.getLatestPriceInfo(a.id);
+          const targetB = this.targetPriceListener.getLatestPriceInfo(b.id);
+          const sourceA = this.sourcePriceListener.getLatestPriceInfo(a.id);
+          const sourceB = this.sourcePriceListener.getLatestPriceInfo(b.id);
+          const staleA =
+            (sourceA?.publishTime ?? 0) - (targetA?.publishTime ?? 0);
+          const staleB =
+            (sourceB?.publishTime ?? 0) - (targetB?.publishTime ?? 0);
+          return staleB - staleA;
+        });
+
         this.logger.info(
           {
             priceIds: pricesToPush.map((priceConfig) => ({

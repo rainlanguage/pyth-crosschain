@@ -27,17 +27,16 @@ yargs(hideBin(process.argv))
   })
   .config("config")
   .global("config")
+  .option("enable-metrics", enableMetrics["enable-metrics"])
+  .option("metrics-port", metricsPort["metrics-port"])
+  .option("sentry-dsn", sentryDsn["sentry-dsn"])
+  .option("sentry-environment", sentryEnvironment["sentry-environment"])
   .middleware((argv) => {
     initSentry({
       dsn: argv["sentry-dsn"] as string | undefined,
       environment: argv["sentry-environment"] as string | undefined,
     });
-    return argv;
   })
-  .option("enable-metrics", enableMetrics["enable-metrics"])
-  .option("metrics-port", metricsPort["metrics-port"])
-  .option("sentry-dsn", sentryDsn["sentry-dsn"])
-  .option("sentry-environment", sentryEnvironment["sentry-environment"])
   .command(evm)
   .command(fuel)
   .command(injective)

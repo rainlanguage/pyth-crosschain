@@ -204,6 +204,12 @@ export class EvmPricePusher implements IPricePusher {
         this.lastPushAttempt = undefined;
         if (confirmed) {
           chunksConfirmed += 1;
+          if (chunkIndex < priceIdChunks.length - 1) {
+            await this.refreshPublishTimesForRemainingChunks(
+              priceIdChunks.slice(chunkIndex + 1),
+              pubTimeChunks.slice(chunkIndex + 1),
+            );
+          }
         }
       } else {
         chunksSkipped += 1;
@@ -217,6 +223,29 @@ export class EvmPricePusher implements IPricePusher {
         { chunksConfirmed, chunksSkipped, totalChunks: priceIdChunks.length },
         "Some price update chunks were skipped in this cycle.",
       );
+    }
+  }
+
+  /** Re-read on-chain publish times after a chunk lands so later chunks avoid NoFreshUpdate. */
+  private async refreshPublishTimesForRemainingChunks(
+    priceIdChunks: string[][],
+    pubTimeChunks: UnixTimestamp[][],
+  ): Promise<void> {
+    for (let i = 0; i < priceIdChunks.length; i++) {
+      for (let j = 0; j < priceIdChunks[i].length; j++) {
+        const priceId = priceIdChunks[i][j];
+        try {
+          const priceRaw = await this.pythContract.read.getPriceUnsafe([
+            addLeading0x(priceId),
+          ]);
+          pubTimeChunks[i][j] = Number(priceRaw.publishTime) + 1;
+        } catch (err) {
+          this.logger.warn(
+            { err, priceId },
+            "Failed to refresh on-chain publish time for remaining chunk; keeping prior pubTime.",
+          );
+        }
+      }
     }
   }
 

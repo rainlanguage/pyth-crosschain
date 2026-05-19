@@ -27,8 +27,8 @@ CMD ["bash", "-c", "npm run start evm -- \
     --mnemonic-file <(echo \"${MNEMONIC}\") \
     --pushing-frequency \"${PUSHING_FREQUENCY:-300}\" \
     --polling-frequency \"${POLLING_FREQUENCY:-5}\" \
-    --gas-limit \"${GAS_LIMIT:-4000000}\" \
+    --gas-limit \"${GAS_LIMIT:-6000000}\" \
     --update-fee-multiplier \"${UPDATE_FEE_MULTIPLIER:-1.2}\" \
-    --price-ids-process-chunk-size \"${PRICE_IDS_PROCESS_CHUNK_SIZE:-25}\" \
-    --override-gas-price-multiplier \"${GAS_PRICE_MULTIPLIER:-1.1}\" \
+    --price-ids-process-chunk-size \"${PRICE_IDS_PROCESS_CHUNK_SIZE:-10}\" \
+    --override-gas-price-multiplier \"${GAS_PRICE_MULTIPLIER:-1.2}\" \
     --override-gas-price-multiplier-cap \"${GAS_PRICE_MULTIPLIER_CAP:-5}\""]

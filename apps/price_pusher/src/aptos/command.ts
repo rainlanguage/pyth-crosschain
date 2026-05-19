@@ -11,7 +11,7 @@ import {
   APTOS_ACCOUNT_HD_PATH,
 } from "./aptos";
 import { AptosAccount } from "aptos";
-import pino from "pino";
+import { createLogger } from "../logger";
 import { filterInvalidPriceItems } from "../utils";
 import { PricePusherMetrics } from "../metrics";
 import { createAptosBalanceTracker } from "./balance-tracker";
@@ -63,7 +63,7 @@ export default {
       metricsPort,
     } = argv;
 
-    const logger = pino({ level: logLevel });
+    const logger = createLogger({ level: logLevel });
 
     const priceConfigs = readPriceConfigFile(priceConfigFile);
     const hermesClient = new HermesClient(priceServiceEndpoint);

@@ -5,7 +5,7 @@ import { PythPriceListener } from "../pyth-price-listener";
 import { Controller } from "../controller";
 import { Options } from "yargs";
 import { NearAccount, NearPriceListener, NearPricePusher } from "./near";
-import pino from "pino";
+import { createLogger } from "../logger";
 import { filterInvalidPriceItems } from "../utils";
 
 export default {
@@ -57,7 +57,7 @@ export default {
       controllerLogLevel,
     } = argv;
 
-    const logger = pino({ level: logLevel });
+    const logger = createLogger({ level: logLevel });
 
     const priceConfigs = readPriceConfigFile(priceConfigFile);
     const hermesClient = new HermesClient(priceServiceEndpoint);

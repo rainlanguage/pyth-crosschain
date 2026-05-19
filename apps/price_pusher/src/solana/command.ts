@@ -17,7 +17,7 @@ import {
   SearcherClient,
   searcherClient,
 } from "jito-ts/dist/sdk/block-engine/searcher";
-import pino from "pino";
+import { createLogger } from "../logger";
 import { Logger } from "pino";
 import { HermesClient } from "@pythnetwork/hermes-client";
 import { filterInvalidPriceItems } from "../utils";
@@ -131,7 +131,7 @@ export default {
       metricsPort,
     } = argv;
 
-    const logger = pino({ level: logLevel });
+    const logger = createLogger({ level: logLevel });
 
     const priceConfigs = readPriceConfigFile(priceConfigFile);
 

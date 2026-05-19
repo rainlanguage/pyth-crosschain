@@ -7,7 +7,7 @@ import { PythPriceListener } from "../pyth-price-listener";
 import { Controller } from "../controller";
 import { EvmPriceListener, EvmPricePusher } from "./evm";
 import { getCustomGasStation } from "./custom-gas-station";
-import pino from "pino";
+import { createLogger } from "../logger";
 import { createClient } from "./super-wallet";
 import { createPythContract } from "./pyth-contract";
 import { isWsEndpoint, filterInvalidPriceItems } from "../utils";
@@ -121,7 +121,7 @@ export default {
       metricsPort,
     } = argv;
 
-    const logger = pino({
+    const logger = createLogger({
       level: logLevel,
     });
 

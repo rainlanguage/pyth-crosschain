@@ -7,7 +7,7 @@ import { FuelPriceListener, FuelPricePusher } from "./fuel";
 import { Controller } from "../controller";
 import { Provider, Wallet } from "fuels";
 import fs from "fs";
-import pino from "pino";
+import { createLogger } from "../logger";
 import { filterInvalidPriceItems } from "../utils";
 export default {
   command: "fuel",
@@ -48,7 +48,7 @@ export default {
       controllerLogLevel,
     } = argv;
 
-    const logger = pino({ level: logLevel });
+    const logger = createLogger({ level: logLevel });
 
     const priceConfigs = readPriceConfigFile(priceConfigFile);
 

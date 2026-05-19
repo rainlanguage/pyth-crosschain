@@ -94,3 +94,21 @@ export const metricsPort = {
     default: 9090,
   } as Options,
 };
+
+export const sentryDsn = {
+  "sentry-dsn": {
+    description:
+      "Sentry DSN for error and log monitoring. Overrides the SENTRY_DSN environment variable.",
+    type: "string",
+    required: false,
+  } as Options,
+};
+
+export const sentryEnvironment = {
+  "sentry-environment": {
+    description:
+      "Sentry environment name (e.g. production, staging). Overrides SENTRY_ENVIRONMENT.",
+    type: "string",
+    required: false,
+  } as Options,
+};

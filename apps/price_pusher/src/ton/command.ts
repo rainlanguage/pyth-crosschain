@@ -6,7 +6,7 @@ import { TonPriceListener, TonPricePusher } from "./ton";
 import { Controller } from "../controller";
 import { Address, TonClient } from "@ton/ton";
 import fs from "fs";
-import pino from "pino";
+import { createLogger } from "../logger";
 import { HermesClient } from "@pythnetwork/hermes-client";
 import { filterInvalidPriceItems } from "../utils";
 
@@ -49,7 +49,7 @@ export default {
       controllerLogLevel,
     } = argv;
 
-    const logger = pino({ level: logLevel });
+    const logger = createLogger({ level: logLevel });
 
     const priceConfigs = readPriceConfigFile(priceConfigFile);
 

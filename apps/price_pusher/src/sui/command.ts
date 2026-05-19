@@ -7,7 +7,7 @@ import { Controller } from "../controller";
 import { Options } from "yargs";
 import { SuiPriceListener, SuiPricePusher } from "./sui";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
-import pino from "pino";
+import { createLogger } from "../logger";
 import { filterInvalidPriceItems } from "../utils";
 import { PricePusherMetrics } from "../metrics";
 import { createSuiBalanceTracker } from "./balance-tracker";
@@ -98,7 +98,7 @@ export default {
       metricsPort,
     } = argv;
 
-    const logger = pino({ level: logLevel });
+    const logger = createLogger({ level: logLevel });
 
     const priceConfigs = readPriceConfigFile(priceConfigFile);
     const hermesClient = new HermesClient(priceServiceEndpoint);

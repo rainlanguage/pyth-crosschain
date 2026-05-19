@@ -85,6 +85,32 @@ const MAX_SKIP_HISTORY = 10;
 const recentSkippedCycles: SkippedCycleRecord[] = [];
 let lastPushAttemptHadZeroConfirmations = false;
 let lastPushAttemptChunksSkipped = 0;
+let currentCycleConfirmedTxHashes: string[] = [];
+
+function blockExplorerTxUrl(txHash: string): string {
+  const prefix =
+    process.env.BLOCK_EXPLORER_TX_URL ?? "https://basescan.org/tx/";
+  const normalized = prefix.endsWith("/") ? prefix : `${prefix}/`;
+  const hash = txHash.startsWith("0x") ? txHash : `0x${txHash}`;
+  return `${normalized}${hash}`;
+}
+
+function formatPushCycleFinishedMessage(
+  error: unknown | undefined,
+  confirmedTxHashes: string[],
+): string {
+  if (error !== undefined) {
+    if (confirmedTxHashes.length === 0) {
+      return "Push cycle finished with error";
+    }
+    const links = confirmedTxHashes.map(blockExplorerTxUrl).join(", ");
+    return `Push cycle finished with error — ${links}`;
+  }
+  if (confirmedTxHashes.length === 0) {
+    return "Push cycle finished (no on-chain confirmation)";
+  }
+  return `Push cycle finished — ${confirmedTxHashes.map(blockExplorerTxUrl).join(", ")}`;
+}
 
 export type PushCycleFeedStats = {
   yesCount: number;
@@ -99,6 +125,7 @@ export type PushCycleFeedStats = {
 export function markPushCycleStarted(pushingFrequencySec: number): number {
   cycleNumber += 1;
   lastCycleStartedAtMs = Date.now();
+  currentCycleConfirmedTxHashes = [];
 
   if (!monitoringEnabled()) {
     return lastCycleStartedAtMs;
@@ -397,8 +424,11 @@ export function capturePushCycleFinished(
     return;
   }
 
+  const confirmedTxHashes = [...currentCycleConfirmedTxHashes];
+  const basescanUrls = confirmedTxHashes.map(blockExplorerTxUrl);
+
   Sentry.captureMessage(
-    context.error ? "Push cycle finished with error" : "Push cycle finished",
+    formatPushCycleFinishedMessage(context.error, confirmedTxHashes),
     {
       level: context.error ? "error" : "info",
       extra: {
@@ -408,6 +438,8 @@ export function capturePushCycleFinished(
         feedsToPush: context.feedsToPush,
         chunksAttempted: context.chunksAttempted,
         chunksConfirmed: context.chunksConfirmed,
+        transactionHashes: confirmedTxHashes,
+        basescanUrls,
         msSinceLastOnChainSuccess:
           lastOnChainSuccessAtMs === undefined
             ? undefined
@@ -444,6 +476,7 @@ export function recordOnChainPushSuccess(txHash: string): void {
   lastOnChainSuccessTxHash = txHash;
   lastPushAttemptHadZeroConfirmations = false;
   lastPushAttemptChunksSkipped = 0;
+  currentCycleConfirmedTxHashes.push(txHash);
 }
 
 export function reportOnChainPushSuccess(

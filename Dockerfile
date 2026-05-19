@@ -14,6 +14,7 @@ ENV SENTRY_CAPTURE_SUCCESS_UPDATES=false
 ENV SENTRY_INTERVAL_WARN_MIN_STALE_SEC=240
 ENV SENTRY_MAX_MS_SINCE_ON_CHAIN_SUCCESS=375000
 # SENTRY_INTERVAL_WARN_ALWAYS — set "true" to warn on push gaps even when market looks idle
+# BLOCK_EXPLORER_TX_URL — tx link prefix in "Push cycle finished" (default https://basescan.org/tx/)
 
 WORKDIR /price-pusher
 ADD . .

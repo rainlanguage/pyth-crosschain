@@ -126,3 +126,21 @@ export function capturePinoLog(args: unknown[], level: number): void {
     extra: context,
   });
 }
+
+function captureSuccessUpdatesEnabled(): boolean {
+  return process.env.SENTRY_CAPTURE_SUCCESS_UPDATES !== "false";
+}
+
+/** Report a confirmed on-chain price update (info-level; not gated by SENTRY_MIN_LOG_LEVEL). */
+export function capturePriceUpdateSuccess(
+  context: Record<string, unknown>,
+): void {
+  if (!sentryInitialized || !captureSuccessUpdatesEnabled()) {
+    return;
+  }
+
+  Sentry.captureMessage("Price update confirmed on-chain", {
+    level: "info",
+    extra: context,
+  });
+}

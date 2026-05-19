@@ -5,7 +5,7 @@ ARG GIT_SHA
 ARG DOCKER_CHANNEL
 ENV GIT_COMMIT=$GIT_SHA
 ENV DOCKER_TAG=$DOCKER_CHANNEL
-# Optional: set SENTRY_DSN (and optionally SENTRY_ENVIRONMENT) in your deployment for error monitoring.
+# Optional Sentry env: SENTRY_DSN, SENTRY_ENVIRONMENT, SENTRY_CAPTURE_SUCCESS_UPDATES (set to "false" to disable).
 
 WORKDIR /price-pusher
 ADD . .

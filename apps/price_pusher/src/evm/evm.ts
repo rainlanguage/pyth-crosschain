@@ -11,6 +11,7 @@ import {
   DurationInSeconds,
   removeLeading0x,
 } from "../utils";
+import { capturePriceUpdateSuccess } from "../sentry";
 import { PythAbi } from "./pyth-abi";
 import { Logger } from "pino";
 import {
@@ -172,7 +173,6 @@ export class EvmPricePusher implements IPricePusher {
     for (let chunkIndex = 0; chunkIndex < priceIdChunks.length; chunkIndex++) {
       const chunkPriceIds = priceIdChunks[chunkIndex];
       const chunkPubTimes = pubTimeChunks[chunkIndex];
-      const waitForReceipt = useChunking && chunkIndex < priceIdChunks.length - 1;
 
       this.logger.info(
         {
@@ -188,8 +188,12 @@ export class EvmPricePusher implements IPricePusher {
         chunkPubTimes,
       );
 
-      if (txHash !== undefined && waitForReceipt) {
-        await this.waitForTransactionReceipt(txHash);
+      if (txHash !== undefined) {
+        await this.waitForTransactionReceipt(txHash, {
+          priceIds: chunkPriceIds,
+          chunkIndex: chunkIndex + 1,
+          totalChunks: priceIdChunks.length,
+        });
         this.lastPushAttempt = undefined;
       }
     }
@@ -308,10 +312,6 @@ export class EvmPricePusher implements IPricePusher {
       const hash = await this.client.writeContract(request);
 
       this.logger.info({ hash }, "Price update sent");
-
-      if (this.priceIdsProcessChunkSize <= 0) {
-        this.waitForTransactionReceipt(hash);
-      }
 
       return hash;
     } catch (err: any) {
@@ -442,7 +442,14 @@ export class EvmPricePusher implements IPricePusher {
     }
   }
 
-  private async waitForTransactionReceipt(hash: `0x${string}`): Promise<void> {
+  private async waitForTransactionReceipt(
+    hash: `0x${string}`,
+    context: {
+      priceIds: string[];
+      chunkIndex?: number;
+      totalChunks?: number;
+    },
+  ): Promise<void> {
     try {
       const receipt = await this.client.waitForTransactionReceipt({
         hash: hash,
@@ -452,6 +459,19 @@ export class EvmPricePusher implements IPricePusher {
         case "success":
           this.logger.debug({ hash, receipt }, "Price update successful");
           this.logger.info({ hash }, "Price update successful");
+          capturePriceUpdateSuccess({
+            hash,
+            blockNumber: receipt.blockNumber.toString(),
+            gasUsed: receipt.gasUsed.toString(),
+            feedCount: context.priceIds.length,
+            priceIds: context.priceIds,
+            ...(context.chunkIndex !== undefined
+              ? {
+                  chunkIndex: context.chunkIndex,
+                  totalChunks: context.totalChunks,
+                }
+              : {}),
+          });
           break;
         default:
           this.logger.info(

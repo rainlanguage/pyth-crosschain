@@ -97,14 +97,6 @@
   early_update:
     time_difference: 150
     price_deviation: 0.03
-- alias: SPLG/USD
-  id: 4dfbf28d72ab41a878afcd4c6d5e9593dca7cf65a0da739cbad9b7414004f82d
-  time_difference: 240    # pushes if on-chain is >5min behind
-  price_deviation: 0.05   # 0.05% deviation trips a push
-  confidence_ratio: 200   # effectively ignore this trigger
-  early_update:
-    time_difference: 150
-    price_deviation: 0.03
 - alias: IAU/USD
   id: f703fbded84f7da4bd9ff4661b5d1ffefa8a9c90b7fa12f247edc8251efac914
   time_difference: 240    # pushes if on-chain is >5min behind

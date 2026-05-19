@@ -1,6 +1,5 @@
 # Stable equity feeds: time_difference 300s aligns with pushing-frequency 300 (5 min on-chain).
-# Regular symbols (e.g. AMZN/USD) may batch as EARLY when another feed hits YES.
-# .PRE / .POST only push when they hit YES themselves (not piggybacked on regular-session pushes).
+# When any feed hits YES, other feeds (including .PRE / .POST) in EARLY are batched in the same tx.
 # Default chunk size 25 (~30 feeds → 2 txs max when all push); use 10–20 for 100+ feeds.
 - alias: AMZN/USD
   id: b5d0e0fa58a1f8b81498ae670ce93c872d14434b72c364885d4fa1b257cbb07a

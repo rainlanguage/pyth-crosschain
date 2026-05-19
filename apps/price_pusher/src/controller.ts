@@ -20,21 +20,6 @@ import {
   type FeedStalenessSummary,
 } from "./push-monitoring";
 
-/** .PRE / .POST only push on YES, not as EARLY riders on regular-session txs. */
-function shouldIncludeFeedInPush(
-  priceConfig: PriceConfig,
-  condition: UpdateCondition,
-): boolean {
-  if (condition === UpdateCondition.YES) {
-    return true;
-  }
-  if (condition === UpdateCondition.EARLY) {
-    const { alias } = priceConfig;
-    return !alias.endsWith(".PRE") && !alias.endsWith(".POST");
-  }
-  return false;
-}
-
 export class Controller {
   private pushingFrequency: DurationInSeconds;
   private metrics?: PricePusherMetrics;
@@ -70,8 +55,7 @@ export class Controller {
     for (;;) {
       const cycleStartedAtMs = markPushCycleStarted(this.pushingFrequency);
 
-      // Push when at least one feed is YES. Regular feeds may also ride along as EARLY;
-      // .PRE / .POST are never batched as EARLY (only when they hit YES on their own).
+      // Push all YES or EARLY feeds when at least one feed is YES (includes .PRE / .POST as EARLY).
       let pushThresholdMet = false;
       const pricesToPush: PriceConfig[] = [];
       const pubTimesToPush: UnixTimestamp[] = [];
@@ -137,7 +121,10 @@ export class Controller {
           pushThresholdMet = true;
         }
 
-        if (shouldIncludeFeedInPush(priceConfig, priceShouldUpdate)) {
+        if (
+          priceShouldUpdate == UpdateCondition.YES ||
+          priceShouldUpdate == UpdateCondition.EARLY
+        ) {
           pricesToPush.push(priceConfig);
           pubTimesToPush.push((targetLatestPrice?.publishTime || 0) + 1);
         }

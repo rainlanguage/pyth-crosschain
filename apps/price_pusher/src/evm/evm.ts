@@ -226,6 +226,54 @@ export class EvmPricePusher implements IPricePusher {
     }
   }
 
+  /**
+   * Set tx gas from simulation estimate (+ headroom), capped by gas-limit.
+   * You only pay for gas used; a fixed 6M limit does not cost more but bloats the tx header.
+   */
+  private async resolveGasLimit(
+    request: Awaited<
+      ReturnType<
+        PythContract["simulate"]["updatePriceFeedsIfNecessary"]
+      >
+    >["request"],
+    maxGasCap: bigint,
+    feedCount: number,
+  ): Promise<bigint> {
+    const headroomNumerator = 125n;
+    const headroomDenominator = 100n;
+    const minGas = BigInt(Math.max(250_000, feedCount * 30_000));
+
+    try {
+      const estimated = await this.client.estimateContractGas({
+        ...request,
+        account: this.client.account,
+      });
+      let gasLimit = (estimated * headroomNumerator) / headroomDenominator;
+      if (gasLimit < minGas) {
+        gasLimit = minGas;
+      }
+      if (gasLimit > maxGasCap) {
+        gasLimit = maxGasCap;
+      }
+      this.logger.info(
+        {
+          estimatedGas: estimated.toString(),
+          gasLimit: gasLimit.toString(),
+          maxGasCap: maxGasCap.toString(),
+          feedCount,
+        },
+        "Gas limit from RPC estimate",
+      );
+      return gasLimit;
+    } catch (err) {
+      this.logger.warn(
+        { err, maxGasCap: maxGasCap.toString(), feedCount },
+        "Gas estimation failed; using max gas cap.",
+      );
+      return maxGasCap;
+    }
+  }
+
   /** Re-read on-chain publish times after a chunk lands so later chunks avoid NoFreshUpdate. */
   private async refreshPublishTimesForRemainingChunks(
     priceIdChunks: string[][],
@@ -340,12 +388,11 @@ export class EvmPricePusher implements IPricePusher {
     };
 
     try {
-      const gasLimitToUse = this.gasLimit !== undefined
-        ? BigInt(Math.ceil(this.gasLimit))
-        : BigInt(1000000); // Default gas limit of 1M gas units
-      
-      this.logger.debug(`Using gas limit: ${gasLimitToUse}, gas price: ${gasPrice}, update fee: ${updateFee}`);
-      
+      const maxGasCap =
+        this.gasLimit !== undefined
+          ? BigInt(Math.ceil(this.gasLimit))
+          : BigInt(1_200_000);
+
       const { request } =
         await this.pythContract.simulate.updatePriceFeedsIfNecessary(
           [priceFeedUpdateDataWith0x, priceIdsWith0x, pubTimesToPushParam],
@@ -353,13 +400,30 @@ export class EvmPricePusher implements IPricePusher {
             value: updateFee,
             gasPrice: BigInt(Math.ceil(gasPrice)),
             nonce: txNonce,
-            gas: gasLimitToUse,
+            gas: maxGasCap,
           },
         );
 
-      this.logger.debug({ request }, "Simulated request successfully");
+      const gasLimitToUse = await this.resolveGasLimit(
+        request,
+        maxGasCap,
+        priceIds.length,
+      );
 
-      const hash = await this.client.writeContract(request);
+      this.logger.debug(
+        {
+          gasLimit: gasLimitToUse.toString(),
+          maxGasCap: maxGasCap.toString(),
+          gasPrice,
+          updateFee: updateFee.toString(),
+        },
+        "Simulated request successfully",
+      );
+
+      const hash = await this.client.writeContract({
+        ...request,
+        gas: gasLimitToUse,
+      });
 
       this.logger.info({ hash }, "Price update sent");
 

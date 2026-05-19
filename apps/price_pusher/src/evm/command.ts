@@ -59,7 +59,8 @@ export default {
       default: 5,
     } as Options,
     "gas-limit": {
-      description: "Gas limit for the transaction",
+      description:
+        "Maximum gas limit per transaction. Actual gas is estimated from simulation (+25% headroom).",
       type: "number",
       required: false,
     } as Options,

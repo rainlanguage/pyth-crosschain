@@ -1,7 +1,12 @@
 import { UnixTimestamp } from "@pythnetwork/hermes-client";
 import { DurationInSeconds, sleep } from "./utils";
 import { IPriceListener, IPricePusher } from "./interface";
-import { PriceConfig, shouldUpdate, UpdateCondition } from "./price-config";
+import {
+  analyzeFeedUpdate,
+  PriceConfig,
+  shouldUpdate,
+  UpdateCondition,
+} from "./price-config";
 import { Logger } from "pino";
 import { PricePusherMetrics } from "./metrics";
 import {
@@ -14,6 +19,21 @@ import {
   recordPushCycleContext,
   type FeedStalenessSummary,
 } from "./push-monitoring";
+
+/** .PRE / .POST only push on YES, not as EARLY riders on regular-session txs. */
+function shouldIncludeFeedInPush(
+  priceConfig: PriceConfig,
+  condition: UpdateCondition,
+): boolean {
+  if (condition === UpdateCondition.YES) {
+    return true;
+  }
+  if (condition === UpdateCondition.EARLY) {
+    const { alias } = priceConfig;
+    return !alias.endsWith(".PRE") && !alias.endsWith(".POST");
+  }
+  return false;
+}
 
 export class Controller {
   private pushingFrequency: DurationInSeconds;
@@ -50,8 +70,8 @@ export class Controller {
     for (;;) {
       const cycleStartedAtMs = markPushCycleStarted(this.pushingFrequency);
 
-      // We will push all prices whose update condition is YES or EARLY as long as there is
-      // at least one YES.
+      // Push when at least one feed is YES. Regular feeds may also ride along as EARLY;
+      // .PRE / .POST are never batched as EARLY (only when they hit YES on their own).
       let pushThresholdMet = false;
       const pricesToPush: PriceConfig[] = [];
       const pubTimesToPush: UnixTimestamp[] = [];
@@ -83,6 +103,11 @@ export class Controller {
           );
         }
 
+        const feedAnalysis = analyzeFeedUpdate(
+          priceConfig,
+          sourceLatestPrice,
+          targetLatestPrice,
+        );
         const priceShouldUpdate = shouldUpdate(
           priceConfig,
           sourceLatestPrice,
@@ -94,20 +119,13 @@ export class Controller {
           missingSourceCount += 1;
         }
 
-        const timeLagSec =
-          sourceLatestPrice !== undefined && targetLatestPrice !== undefined
-            ? Math.max(
-                0,
-                sourceLatestPrice.publishTime - targetLatestPrice.publishTime,
-              )
-            : sourceLatestPrice !== undefined
-              ? Number.MAX_SAFE_INTEGER
-              : 0;
-
         feedSummaries.push({
           alias,
-          timeLagSec,
+          timeLagSec: feedAnalysis.timeLagSec,
           condition: priceShouldUpdate,
+          blockerReason: feedAnalysis.blockerReason,
+          priceDeviationPct: feedAnalysis.priceDeviationPct,
+          confidenceRatioPct: feedAnalysis.confidenceRatioPct,
         });
 
         // Record update condition in metrics
@@ -119,14 +137,12 @@ export class Controller {
           pushThresholdMet = true;
         }
 
-        if (
-          priceShouldUpdate == UpdateCondition.YES ||
-          priceShouldUpdate == UpdateCondition.EARLY
-        ) {
+        if (shouldIncludeFeedInPush(priceConfig, priceShouldUpdate)) {
           pricesToPush.push(priceConfig);
           pubTimesToPush.push((targetLatestPrice?.publishTime || 0) + 1);
         }
       }
+
       const feedStats = buildFeedStats(feedSummaries, missingSourceCount);
 
       if (pushThresholdMet) {
@@ -228,7 +244,11 @@ export class Controller {
           }
         }
       } else {
-        capturePushCycleNoPush(this.pushingFrequency, feedStats);
+        capturePushCycleNoPush(
+          this.pushingFrequency,
+          feedStats,
+          feedSummaries.length,
+        );
         this.logger.info("None of the checks were triggered. No push needed.");
       }
 

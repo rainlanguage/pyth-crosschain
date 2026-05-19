@@ -13,6 +13,7 @@ import {
 } from "../utils";
 import {
   capturePushChunkSkipped,
+  recordPushAttemptResult,
   reportOnChainPushSuccess,
 } from "../push-monitoring";
 import { PythAbi } from "./pyth-abi";
@@ -208,6 +209,8 @@ export class EvmPricePusher implements IPricePusher {
         chunksSkipped += 1;
       }
     }
+
+    recordPushAttemptResult(chunksConfirmed, chunksSkipped);
 
     if (chunksSkipped > 0) {
       this.logger.warn(

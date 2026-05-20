@@ -8,6 +8,19 @@ function monitoringEnabled(): boolean {
   );
 }
 
+/** Full cycle telemetry (started/triggered/skipped). Default is alerts-only. */
+function verbosePushMonitoring(): boolean {
+  return process.env.SENTRY_PUSH_CYCLE_VERBOSE === "true";
+}
+
+function shouldReportChunkSkip(reason: string): boolean {
+  if (verbosePushMonitoring()) {
+    return true;
+  }
+  // Expected when nothing to update; not actionable.
+  return reason !== "no_fresh_update";
+}
+
 let cycleNumber = 0;
 let lastCycleStartedAtMs: number | undefined;
 let lastOnChainSuccessAtMs: number | undefined;
@@ -138,20 +151,6 @@ export function markPushCycleStarted(pushingFrequencySec: number): number {
 
   const maxMsSinceOnChainSuccess =
     getMaxMsSinceOnChainSuccess(pushingFrequencySec);
-
-  Sentry.captureMessage("Push cycle started", {
-    level: "info",
-    extra: {
-      cycleNumber,
-      pushingFrequencySec,
-      msSinceLastOnChainSuccess: msSinceLastSuccess,
-      maxMsSinceOnChainSuccess,
-      targetIntervalMs: pushingFrequencySec * 1000,
-      lastOnChainSuccessTxHash,
-      previousCycleMaxStaleSec,
-      previousCyclePushAttempted,
-    },
-  });
 
   if (
     msSinceLastSuccess !== undefined &&
@@ -328,6 +327,10 @@ export function capturePushCycleNoPush(
   const diagnosis = diagnoseCycleSkip(stats, totalFeedCount);
   recordSkippedCycle(pushingFrequencySec, stats, diagnosis);
 
+  if (!verbosePushMonitoring()) {
+    return;
+  }
+
   Sentry.captureMessage("Push cycle skipped — no on-chain update", {
     level: "info",
     extra: {
@@ -375,7 +378,7 @@ export function capturePushCycleTriggered(
   stats: PushCycleFeedStats,
   pushStartedAtMs: number,
 ): void {
-  if (!monitoringEnabled()) {
+  if (!monitoringEnabled() || !verbosePushMonitoring()) {
     return;
   }
 
@@ -394,7 +397,7 @@ export function capturePushCycleOverrun(
   pushingFrequencySec: number,
   cycleElapsedMs: number,
 ): void {
-  if (!monitoringEnabled()) {
+  if (!monitoringEnabled() || !verbosePushMonitoring()) {
     return;
   }
 
@@ -427,6 +430,14 @@ export function capturePushCycleFinished(
   const confirmedTxHashes = [...currentCycleConfirmedTxHashes];
   const basescanUrls = confirmedTxHashes.map(blockExplorerTxUrl);
 
+  if (
+    !verbosePushMonitoring() &&
+    context.error === undefined &&
+    confirmedTxHashes.length === 0
+  ) {
+    return;
+  }
+
   Sentry.captureMessage(
     formatPushCycleFinishedMessage(context.error, confirmedTxHashes),
     {
@@ -457,7 +468,7 @@ export function capturePushChunkSkipped(
   reason: string,
   context: Record<string, unknown>,
 ): void {
-  if (!monitoringEnabled()) {
+  if (!monitoringEnabled() || !shouldReportChunkSkip(reason)) {
     return;
   }
 

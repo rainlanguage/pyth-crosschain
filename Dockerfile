@@ -8,7 +8,9 @@ ENV DOCKER_TAG=$DOCKER_CHANNEL
 
 # Sentry: set SENTRY_DSN at deploy time (do not bake into the image).
 # SENTRY_ENVIRONMENT — optional (e.g. production, staging)
-# SENTRY_PUSH_CYCLE_MONITORING — set "false" to disable all push-cycle / chunk Sentry events
+# SENTRY_PUSH_CYCLE_MONITORING — set "false" to disable push-cycle Sentry entirely
+# SENTRY_PUSH_CYCLE_VERBOSE — set "true" for started/triggered/skipped/no-push events (noisy)
+# Default alerts only: successful push (basescan link), push gaps, failed chunks, errors
 ENV SENTRY_MIN_LOG_LEVEL=error
 ENV SENTRY_CAPTURE_SUCCESS_UPDATES=false
 ENV SENTRY_INTERVAL_WARN_MIN_STALE_SEC=240
@@ -30,6 +32,6 @@ CMD ["bash", "-c", "npm run start evm -- \
     --polling-frequency \"${POLLING_FREQUENCY:-5}\" \
     --gas-limit \"${GAS_LIMIT:-6000000}\" \
     --update-fee-multiplier \"${UPDATE_FEE_MULTIPLIER:-1.2}\" \
-    --price-ids-process-chunk-size \"${PRICE_IDS_PROCESS_CHUNK_SIZE:-25}\" \
+    --price-ids-process-chunk-size \"${PRICE_IDS_PROCESS_CHUNK_SIZE:-50}\" \
     --override-gas-price-multiplier \"${GAS_PRICE_MULTIPLIER:-1.2}\" \
     --override-gas-price-multiplier-cap \"${GAS_PRICE_MULTIPLIER_CAP:-5}\""]

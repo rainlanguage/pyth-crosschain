@@ -121,6 +121,14 @@ export function capturePinoLog(args: unknown[], level: number): void {
         : "Price pusher log event";
   }
 
+  // Transient RPC poll failures are logged locally; skip Sentry unless verbose.
+  if (
+    process.env.SENTRY_CAPTURE_POLL_ERRORS !== "true" &&
+    message.includes("Polling on-chain price")
+  ) {
+    return;
+  }
+
   Sentry.captureMessage(message, {
     level: sentryLevel,
     extra: context,

@@ -139,6 +139,42 @@ function captureSuccessUpdatesEnabled(): boolean {
   return process.env.SENTRY_CAPTURE_SUCCESS_UPDATES !== "false";
 }
 
+const lastHermesSentryAtMs = new Map<string, number>();
+const HERMES_SENTRY_MIN_INTERVAL_MS = 60_000;
+
+/** Hermes SSE / EventSource failures (always reported when Sentry is enabled). */
+export function captureHermesStreamError(context: {
+  streamIndex: number;
+  feedCount: number;
+  totalFeeds: number;
+  message: string;
+  statusCode?: number;
+  consecutiveFailures: number;
+}): void {
+  if (!sentryInitialized) {
+    return;
+  }
+
+  const dedupeKey = `${context.streamIndex}:${context.statusCode ?? "unknown"}`;
+  const now = Date.now();
+  const lastSent = lastHermesSentryAtMs.get(dedupeKey);
+  if (lastSent !== undefined && now - lastSent < HERMES_SENTRY_MIN_INTERVAL_MS) {
+    return;
+  }
+  lastHermesSentryAtMs.set(dedupeKey, now);
+
+  const statusSuffix =
+    context.statusCode !== undefined ? ` (${context.statusCode})` : "";
+
+  Sentry.captureMessage(
+    `Hermes price stream error${statusSuffix}: ${context.message}`,
+    {
+      level: "error",
+      extra: context,
+    },
+  );
+}
+
 /** Report a confirmed on-chain price update (info-level; not gated by SENTRY_MIN_LOG_LEVEL). */
 export function capturePriceUpdateSuccess(
   context: Record<string, unknown>,

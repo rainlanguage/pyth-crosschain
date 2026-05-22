@@ -8,6 +8,7 @@ import { Controller } from "../controller";
 import { EvmPriceListener, EvmPricePusher } from "./evm";
 import { getCustomGasStation } from "./custom-gas-station";
 import { createLogger } from "../logger";
+import { captureHermesStreamError } from "../sentry";
 import { createClient } from "./super-wallet";
 import { createPythContract } from "./pyth-contract";
 import { isWsEndpoint, filterInvalidPriceItems } from "../utils";
@@ -166,9 +167,19 @@ export default {
     const receivedUpdate = await pythListener.waitForFirstPriceUpdate(15000);
     
     if (receivedUpdate) {
-      console.log('Price update received!');
+      logger.info("First Hermes price update received.");
     } else {
-      console.log('Timeout waiting for price update');
+      logger.error(
+        { timeoutMs: 15000, feedCount: priceItems.length },
+        "Timeout waiting for first Hermes price update.",
+      );
+      captureHermesStreamError({
+        streamIndex: -1,
+        feedCount: priceItems.length,
+        totalFeeds: priceItems.length,
+        message: "Timeout waiting for first Hermes price update",
+        consecutiveFailures: 1,
+      });
     }
 
     const client = await createClient(endpoint, mnemonic);

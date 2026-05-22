@@ -142,7 +142,7 @@ function captureSuccessUpdatesEnabled(): boolean {
 const lastHermesSentryAtMs = new Map<string, number>();
 const HERMES_SENTRY_MIN_INTERVAL_MS = 60_000;
 
-/** Hermes SSE / EventSource failures (always reported when Sentry is enabled). */
+/** Hermes SSE / EventSource failures and startup timeouts (when Sentry is enabled). */
 export function captureHermesStreamError(context: {
   streamIndex: number;
   feedCount: number;

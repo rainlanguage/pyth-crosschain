@@ -3,54 +3,11 @@ import {
   HermesClient,
   PriceUpdate,
 } from "@pythnetwork/hermes-client";
-import { EventSource } from "eventsource";
 import { PriceInfo, IPriceListener, PriceItem } from "./interface";
 import { Logger } from "pino";
-import { chunkArray, sleep } from "./utils";
-import { captureHermesStreamError } from "./sentry";
+import { sleep } from "./utils";
 
 type TimestampInMs = number & { readonly _: unique symbol };
-
-type StreamState = {
-  streamIndex: number;
-  priceIds: HexString[];
-  eventSource?: EventSource;
-  reconnecting: boolean;
-  consecutiveFailures: number;
-};
-
-function hermesStreamChunkSize(): number {
-  const fromEnv = process.env.HERMES_STREAM_CHUNK_SIZE;
-  if (fromEnv !== undefined && fromEnv !== "") {
-    const parsed = Number(fromEnv);
-    if (!Number.isNaN(parsed) && parsed > 0) {
-      return parsed;
-    }
-  }
-  return 15;
-}
-
-function parseHermesStreamError(error: Event): {
-  message: string;
-  statusCode?: number;
-} {
-  const err = error as Event & {
-    message?: string;
-    code?: number;
-  };
-  const message =
-    typeof err.message === "string"
-      ? err.message
-      : "Hermes price stream error";
-  const statusMatch = message.match(/\((\d{3})\)/);
-  const statusCode =
-    typeof err.code === "number"
-      ? err.code
-      : statusMatch
-        ? Number(statusMatch[1])
-        : undefined;
-  return { message, statusCode };
-}
 
 export class PythPriceListener implements IPriceListener {
   private hermesClient: HermesClient;
@@ -60,8 +17,6 @@ export class PythPriceListener implements IPriceListener {
   private logger: Logger;
   private lastUpdated: TimestampInMs | undefined;
   private healthCheckInterval?: NodeJS.Timeout;
-  private streamStates: StreamState[] = [];
-  private stopped = false;
 
   constructor(
     hermesClient: HermesClient,
@@ -77,10 +32,12 @@ export class PythPriceListener implements IPriceListener {
     this.logger = logger;
   }
 
+  // This method should be awaited on and once it finishes it has the latest value
+  // for the given price feeds (if they exist).
   async start() {
-    this.stopped = false;
     await this.startListening();
 
+    // Store health check interval reference
     this.healthCheckInterval = setInterval(() => {
       if (
         this.lastUpdated === undefined ||
@@ -92,187 +49,71 @@ export class PythPriceListener implements IPriceListener {
   }
 
   async startListening() {
-    const chunkSize = hermesStreamChunkSize();
-    const priceIdChunks =
-      this.priceIds.length > chunkSize
-        ? chunkArray(this.priceIds, chunkSize)
-        : [this.priceIds];
-
     this.logger.info(
+      `Starting to listen for price updates from Hermes for ${this.priceIds.length} price feeds.`,
+    );
+    console.log('Price IDs being requested:', this.priceIds);
+
+    const eventSource = await this.hermesClient.getPriceUpdatesStream(
+      this.priceIds,
       {
-        totalFeeds: this.priceIds.length,
-        streamCount: priceIdChunks.length,
-        feedsPerStream: chunkSize,
-      },
-      "Starting Hermes price streams.",
-    );
-
-    this.streamStates = priceIdChunks.map((priceIds, streamIndex) => ({
-      streamIndex,
-      priceIds,
-      reconnecting: false,
-      consecutiveFailures: 0,
-    }));
-
-    await Promise.all(
-      this.streamStates.map((state) => this.openStream(state)),
-    );
-  }
-
-  private async openStream(state: StreamState): Promise<void> {
-    if (this.stopped) {
-      return;
-    }
-
-    const { streamIndex, priceIds } = state;
-
-    this.logger.info(
-      { streamIndex, feedCount: priceIds.length },
-      "Opening Hermes price stream.",
-    );
-
-    let eventSource: EventSource;
-    try {
-      eventSource = await this.hermesClient.getPriceUpdatesStream(priceIds, {
         parsed: true,
         ignoreInvalidPriceIds: true,
-      });
-    } catch (err) {
-      state.consecutiveFailures += 1;
-      const message =
-        err instanceof Error ? err.message : "Failed to open Hermes stream";
-      this.logger.error(
-        { err, streamIndex, feedCount: priceIds.length },
-        "Failed to create Hermes EventSource.",
-      );
-      captureHermesStreamError({
-        streamIndex,
-        feedCount: priceIds.length,
-        totalFeeds: this.priceIds.length,
-        message,
-        consecutiveFailures: state.consecutiveFailures,
-      });
-      await this.scheduleReconnect(state);
-      return;
-    }
-
-    state.eventSource = eventSource;
-    state.consecutiveFailures = 0;
-
+      },
+    );
+    console.log('EventSource created, waiting for messages...');
     eventSource.onmessage = (event: MessageEvent<string>) => {
-      this.handlePriceMessage(event);
-    };
-
-    eventSource.onerror = (error: Event) => {
-      void this.handleStreamError(state, error);
-    };
-  }
-
-  private handlePriceMessage(event: MessageEvent<string>) {
-    const priceUpdates = JSON.parse(event.data) as PriceUpdate;
-    priceUpdates.parsed?.forEach((priceUpdate) => {
-      this.logger.debug(
-        {
-          alias: this.priceIdToAlias.get(priceUpdate.id),
-          priceId: priceUpdate.id,
-        },
-        "Received Hermes price update.",
-      );
-
-      const currentTime = Date.now() / 1000;
-      const timeDiff = currentTime - priceUpdate.price.publish_time;
-
-      const currentPrice =
-        timeDiff > 24 * 60 * 60 ? undefined : priceUpdate.price;
-      if (currentPrice === undefined) {
+      const priceUpdates = JSON.parse(event.data) as PriceUpdate;
+      priceUpdates.parsed?.forEach((priceUpdate) => {
         this.logger.debug(
-          { priceId: priceUpdate.id, ageSec: timeDiff },
-          "Skipping Hermes price older than 24h.",
+          `Received new price feed update from Pyth price service: ${this.priceIdToAlias.get(
+            priceUpdate.id,
+          )} ${priceUpdate.id}`,
         );
-        return;
-      }
 
-      const priceInfo: PriceInfo = {
-        conf: currentPrice.conf,
-        price: currentPrice.price,
-        publishTime: currentPrice.publish_time,
-      };
+        // Consider price to be currently available if it is not older than 24 hours
+        const currentTime = Date.now() / 1000;
+        const timeDiff = currentTime - priceUpdate.price.publish_time;
+        console.log(`Price age check: currentTime=${currentTime}, publishTime=${priceUpdate.price.publish_time}, diff=${timeDiff}s`);
+        
+        const currentPrice =
+          timeDiff > 24 * 60 * 60 // 24 hours in seconds
+            ? undefined
+            : priceUpdate.price;
+        if (currentPrice === undefined) {
+          console.log(`Price is older than 24 hours (${timeDiff}s), skipping`);
+          return;
+        }
 
-      this.latestPriceInfo.set(priceUpdate.id, priceInfo);
-      this.lastUpdated = Date.now() as TimestampInMs;
-    });
-  }
+        const priceInfo: PriceInfo = {
+          conf: currentPrice.conf,
+          price: currentPrice.price,
+          publishTime: currentPrice.publish_time,
+        };
 
-  private async handleStreamError(
-    state: StreamState,
-    error: Event,
-  ): Promise<void> {
-    if (state.reconnecting || this.stopped) {
-      return;
-    }
-    state.reconnecting = true;
+        this.latestPriceInfo.set(priceUpdate.id, priceInfo);
+        this.lastUpdated = Date.now() as TimestampInMs;
+      });
+    };
 
-    const { message, statusCode } = parseHermesStreamError(error);
-    state.consecutiveFailures += 1;
-
-    const readyState = state.eventSource?.readyState;
-    state.eventSource?.close();
-    state.eventSource = undefined;
-
-    this.logger.error(
-      {
-        streamIndex: state.streamIndex,
-        feedCount: state.priceIds.length,
-        statusCode,
-        readyState,
-        consecutiveFailures: state.consecutiveFailures,
-        errMessage: message,
-      },
-      "Error receiving updates from Hermes.",
-    );
-
-    captureHermesStreamError({
-      streamIndex: state.streamIndex,
-      feedCount: state.priceIds.length,
-      totalFeeds: this.priceIds.length,
-      message,
-      statusCode,
-      consecutiveFailures: state.consecutiveFailures,
-    });
-
-    await this.scheduleReconnect(state);
-    state.reconnecting = false;
-  }
-
-  private async scheduleReconnect(state: StreamState): Promise<void> {
-    if (this.stopped) {
-      return;
-    }
-
-    const backoffSec = Math.min(
-      60,
-      5 * Math.pow(2, Math.min(state.consecutiveFailures - 1, 4)),
-    );
-    this.logger.warn(
-      {
-        streamIndex: state.streamIndex,
-        backoffSec,
-        consecutiveFailures: state.consecutiveFailures,
-      },
-      "Reconnecting to Hermes stream.",
-    );
-    await sleep(backoffSec * 1000);
-    await this.openStream(state);
+    eventSource.onerror = async (error: Event) => {
+      console.error("Error receiving updates from Hermes:", error);
+      console.error("EventSource readyState:", eventSource.readyState);
+      eventSource.close();
+      await sleep(5000); // Wait a bit before trying to reconnect
+      this.startListening(); // Attempt to restart the listener
+    };
   }
 
   getLatestPriceInfo(priceId: HexString): PriceInfo | undefined {
     return this.latestPriceInfo.get(priceId);
   }
 
+  // Wait for the first price update to be received
   async waitForFirstPriceUpdate(timeoutMs: number = 10000): Promise<boolean> {
     return new Promise((resolve) => {
       const startTime = Date.now();
-
+      
       const checkInterval = setInterval(() => {
         if (this.latestPriceInfo.size > 0) {
           clearInterval(checkInterval);
@@ -286,10 +127,6 @@ export class PythPriceListener implements IPriceListener {
   }
 
   cleanup() {
-    this.stopped = true;
-    for (const state of this.streamStates) {
-      state.eventSource?.close();
-    }
     if (this.healthCheckInterval) {
       clearInterval(this.healthCheckInterval);
     }

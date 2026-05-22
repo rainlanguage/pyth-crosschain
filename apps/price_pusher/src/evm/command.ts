@@ -166,9 +166,9 @@ export default {
     const receivedUpdate = await pythListener.waitForFirstPriceUpdate(15000);
     
     if (receivedUpdate) {
-      console.log('Price update received!');
+      logger.info("Received first Hermes price update after startup");
     } else {
-      console.log('Timeout waiting for price update');
+      logger.warn("Timed out waiting for first Hermes price update after startup");
     }
 
     const client = await createClient(endpoint, mnemonic);

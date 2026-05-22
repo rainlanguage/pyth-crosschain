@@ -48,13 +48,13 @@ export class FuelPriceListener extends ChainPriceListener {
         .price_unsafe(formattedPriceId)
         .get();
 
-      console.log({
-        conf: priceInfo.value.confidence.toString(),
-        price: priceInfo.value.price.toString(),
-        publishTime: tai64ToUnix(priceInfo.value.publish_time),
-      });
-
       this.logger.debug(
+        {
+          priceId,
+          conf: priceInfo.value.confidence.toString(),
+          price: priceInfo.value.price.toString(),
+          publishTime: tai64ToUnix(priceInfo.value.publish_time),
+        },
         `Polled a Fuel on chain price for feed ${this.priceIdToAlias.get(
           priceId,
         )} (${priceId}).`,

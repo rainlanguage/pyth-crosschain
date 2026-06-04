@@ -39,6 +39,90 @@ import {
 import { PythContract } from "./pyth-contract";
 import { SuperWalletClient } from "./super-wallet";
 
+/** Viem default is 180s. Cap wait below pushing-frequency so a stuck receipt does not block the next cycle. */
+export function getReceiptWaitTimeoutMs(): number {
+  const fromEnv = process.env.RECEIPT_WAIT_TIMEOUT_MS;
+  if (fromEnv !== undefined && fromEnv !== "") {
+    const parsed = Number(fromEnv);
+    if (!Number.isNaN(parsed) && parsed >= 30_000) {
+      return parsed;
+    }
+  }
+
+  const pushingSec = Number(process.env.PUSHING_FREQUENCY ?? "300");
+  if (!Number.isNaN(pushingSec) && pushingSec >= 30) {
+    // e.g. 300s push interval → 270s receipt wait (next cycle can start ~30s after interval)
+    return Math.floor(pushingSec * 1000 * 0.9);
+  }
+
+  return 270_000;
+}
+
+export type TxLookupAfterReceiptWaitFailure = {
+  txLookupStatus:
+    | "not_found_on_rpc"
+    | "pending_on_rpc"
+    | "mined"
+    | "lookup_failed"
+    | "unknown";
+  txLookupHint?: string;
+  blockNumber?: string;
+  receiptStatus?: string;
+  gasUsed?: string;
+  nonce?: number;
+  gasPrice?: string;
+  txLookupError?: string;
+};
+
+export async function diagnoseTxAfterReceiptWaitFailure(
+  client: SuperWalletClient,
+  hash: `0x${string}`,
+): Promise<TxLookupAfterReceiptWaitFailure> {
+  try {
+    const tx = await client.getTransaction({ hash });
+    if (tx === null) {
+      return {
+        txLookupStatus: "not_found_on_rpc",
+        txLookupHint:
+          "RPC has no record of this hash (dropped from mempool, never broadcast, or wrong chain).",
+      };
+    }
+
+    if (tx.blockNumber === null) {
+      return {
+        txLookupStatus: "pending_on_rpc",
+        txLookupHint:
+          "Transaction is still pending on the RPC; try higher gas or a dedicated Base endpoint.",
+        nonce: tx.nonce,
+        gasPrice: tx.gasPrice?.toString(),
+      };
+    }
+
+    const diagnosis: TxLookupAfterReceiptWaitFailure = {
+      txLookupStatus: "mined",
+      blockNumber: tx.blockNumber.toString(),
+    };
+
+    try {
+      const receipt = await client.getTransactionReceipt({ hash });
+      if (receipt) {
+        diagnosis.receiptStatus = receipt.status;
+        diagnosis.gasUsed = receipt.gasUsed.toString();
+      }
+    } catch {
+      // Receipt may lag slightly behind getTransaction on some RPCs.
+    }
+
+    return diagnosis;
+  } catch (lookupErr) {
+    return {
+      txLookupStatus: "lookup_failed",
+      txLookupError:
+        lookupErr instanceof Error ? lookupErr.message : String(lookupErr),
+    };
+  }
+}
+
 export class EvmPriceListener extends ChainPriceListener {
   constructor(
     private pythContract: PythContract,
@@ -564,6 +648,32 @@ export class EvmPricePusher implements IPricePusher {
     }
   }
 
+  private reportChunkPushSuccess(
+    hash: `0x${string}`,
+    receipt: { blockNumber: bigint; gasUsed: bigint; status: string },
+    context: {
+      priceIds: string[];
+      chunkIndex?: number;
+      totalChunks?: number;
+    },
+  ): void {
+    this.logger.debug({ hash, receipt }, "Price update successful");
+    this.logger.info({ hash }, "Price update successful");
+    reportOnChainPushSuccess({
+      hash,
+      blockNumber: receipt.blockNumber.toString(),
+      gasUsed: receipt.gasUsed.toString(),
+      feedCount: context.priceIds.length,
+      priceIds: context.priceIds,
+      ...(context.chunkIndex !== undefined
+        ? {
+            chunkIndex: context.chunkIndex,
+            totalChunks: context.totalChunks,
+          }
+        : {}),
+    });
+  }
+
   private async waitForTransactionReceipt(
     hash: `0x${string}`,
     context: {
@@ -572,28 +682,17 @@ export class EvmPricePusher implements IPricePusher {
       totalChunks?: number;
     },
   ): Promise<boolean> {
+    const receiptWaitTimeoutMs = getReceiptWaitTimeoutMs();
+
     try {
       const receipt = await this.client.waitForTransactionReceipt({
-        hash: hash,
+        hash,
+        timeout: receiptWaitTimeoutMs,
       });
 
       switch (receipt.status) {
         case "success":
-          this.logger.debug({ hash, receipt }, "Price update successful");
-          this.logger.info({ hash }, "Price update successful");
-          reportOnChainPushSuccess({
-            hash,
-            blockNumber: receipt.blockNumber.toString(),
-            gasUsed: receipt.gasUsed.toString(),
-            feedCount: context.priceIds.length,
-            priceIds: context.priceIds,
-            ...(context.chunkIndex !== undefined
-              ? {
-                  chunkIndex: context.chunkIndex,
-                  totalChunks: context.totalChunks,
-                }
-              : {}),
-          });
+          this.reportChunkPushSuccess(hash, receipt, context);
           return true;
         default:
           this.logger.info(
@@ -604,14 +703,54 @@ export class EvmPricePusher implements IPricePusher {
           capturePushChunkSkipped("receipt_not_success", {
             hash,
             status: receipt.status,
+            receiptWaitTimeoutMs,
             ...context,
           });
           return false;
       }
-    } catch (err: any) {
-      this.logger.warn({ err }, "Failed to get transaction receipt");
+    } catch (err: unknown) {
+      const diagnosis = await diagnoseTxAfterReceiptWaitFailure(
+        this.client,
+        hash,
+      );
+
+      // Wait can time out while the tx still lands; recover instead of reporting a gap.
+      if (
+        diagnosis.txLookupStatus === "mined" &&
+        diagnosis.receiptStatus === "success"
+      ) {
+        const receipt = await this.client.getTransactionReceipt({ hash });
+        if (receipt?.status === "success") {
+          this.logger.warn(
+            { hash, receiptWaitTimeoutMs, ...diagnosis },
+            "Receipt wait timed out but transaction succeeded on-chain; treating as confirmed.",
+          );
+          this.reportChunkPushSuccess(hash, receipt, context);
+          return true;
+        }
+      }
+
+      const errorName = err instanceof Error ? err.name : undefined;
+      const errorMessage = err instanceof Error ? err.message : String(err);
+
+      this.logger.warn(
+        {
+          err,
+          hash,
+          receiptWaitTimeoutMs,
+          errorName,
+          errorMessage,
+          ...diagnosis,
+        },
+        "Failed to get transaction receipt",
+      );
+
       capturePushChunkSkipped("receipt_wait_failed", {
         hash,
+        receiptWaitTimeoutMs,
+        errorName,
+        errorMessage,
+        ...diagnosis,
         ...context,
       });
       return false;

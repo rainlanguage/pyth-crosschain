@@ -1,11 +1,6 @@
-- alias: GOOG/USD
-  id: e65ff435be42630439c96396653a342829e877e2aafaeaf1a10d0ee5fd2cf3f2
-  time_difference: 240    # pushes if on-chain is >5min behind
-  price_deviation: 0.05   # 0.05% deviation trips a push
-  confidence_ratio: 200   # effectively ignore this trigger
-  early_update:
-    time_difference: 150
-    price_deviation: 0.03
+# Stable equity feeds: time_difference 240s pushes when on-chain is ~4+ min behind Hermes.
+# Run the pusher with pushing-frequency 300 (5 min) and price-ids-process-chunk-size 10 when
+# listing 100+ feeds so each cycle submits several smaller txs instead of one large batch.
 - alias: AMZN/USD
   id: b5d0e0fa58a1f8b81498ae670ce93c872d14434b72c364885d4fa1b257cbb07a
   time_difference: 240    # pushes if on-chain is >5min behind
@@ -24,22 +19,6 @@
     price_deviation: 0.03
 - alias: AMZN/USD.POST
   id: 62731dfcc8b8542e52753f208248c3e73fab2ec15422d6f65c2decda71ccea0d
-  time_difference: 240    # pushes if on-chain is >5min behind
-  price_deviation: 0.05   # 0.05% deviation trips a push
-  confidence_ratio: 200   # effectively ignore this trigger
-  early_update:
-    time_difference: 150
-    price_deviation: 0.03
-- alias: AAPL/USD
-  id: 49f6b65cb1de6b10eaf75e7c03ca029c306d0357e91b5311b175084a5ad55688
-  time_difference: 240    # pushes if on-chain is >5min behind
-  price_deviation: 0.05   # 0.05% deviation trips a push
-  confidence_ratio: 200   # effectively ignore this trigger
-  early_update:
-    time_difference: 150
-    price_deviation: 0.03
-- alias: MSFT/USD
-  id: d0ca23c1cc005e004ccf1db5bf76aeb6a49218f43dac3d4b275e92de12ded4d1
   time_difference: 240    # pushes if on-chain is >5min behind
   price_deviation: 0.05   # 0.05% deviation trips a push
   confidence_ratio: 200   # effectively ignore this trigger
@@ -94,22 +73,6 @@
   early_update:
     time_difference: 150
     price_deviation: 0.03
-- alias: META/USD
-  id: 78a3e3b8e676a8f73c439f5d749737034b139bbbe899ba5775216fba596607fe
-  time_difference: 240    # pushes if on-chain is >5min behind
-  price_deviation: 0.05   # 0.05% deviation trips a push
-  confidence_ratio: 200   # effectively ignore this trigger
-  early_update:
-    time_difference: 150
-    price_deviation: 0.03
-- alias: GME/USD
-  id: 6f9cd89ef1b7fd39f667101a91ad578b6c6ace4579d5f7f285a4b06aa4504be6
-  time_difference: 240    # pushes if on-chain is >5min behind
-  price_deviation: 0.05   # 0.05% deviation trips a push
-  confidence_ratio: 200   # effectively ignore this trigger
-  early_update:
-    time_difference: 150
-    price_deviation: 0.03
 - alias: MSTR/USD
   id: e1e80251e5f5184f2195008382538e847fafc36f751896889dd3d1b1f6111f09
   time_difference: 240    # pushes if on-chain is >5min behind
@@ -128,14 +91,6 @@
     price_deviation: 0.03
 - alias: MSTR/USD.POST
   id: d8b856d7e17c467877d2d947f27b832db0d65b362ddb6f728797d46b0a8b54c0
-  time_difference: 240    # pushes if on-chain is >5min behind
-  price_deviation: 0.05   # 0.05% deviation trips a push
-  confidence_ratio: 200   # effectively ignore this trigger
-  early_update:
-    time_difference: 150
-    price_deviation: 0.03
-- alias: BRKB/USD
-  id: e21c688b7fc65b4606a50f3635f466f6986db129bf16979875d160f9c508e8c7
   time_difference: 240    # pushes if on-chain is >5min behind
   price_deviation: 0.05   # 0.05% deviation trips a push
   confidence_ratio: 200   # effectively ignore this trigger
@@ -280,6 +235,38 @@
     price_deviation: 0.03
 - alias: ARKK/USD
   id: b2fe0af6c828efefda3ffda664f919825a535aa28a0f19fc238945c7aff540b1
+  time_difference: 240    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: TSM/USD
+  id: e722560a66e4ab00522ef20a38fa2ba5d1b41f1c5404723ed895d202a7af7cc4
+  time_difference: 240    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: TSM/USD.PRE
+  id: 6ad383437975189ea6ff0efad3de790d34ff36091a5a24c965e5f047a5de45de
+  time_difference: 240    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: TSM/USD.POST
+  id: 763b87165de66edfce13a7c98c13eb781a44b01ff474b61a6155833b12a65ec3
+  time_difference: 240    # pushes if on-chain is >5min behind
+  price_deviation: 0.05   # 0.05% deviation trips a push
+  confidence_ratio: 200   # effectively ignore this trigger
+  early_update:
+    time_difference: 150
+    price_deviation: 0.03
+- alias: CEG/USD
+  id: a541bc5c4b69961442e45e9198c7cce151ff9c2a1003f620c6d4a9785c77a4d9
   time_difference: 240    # pushes if on-chain is >5min behind
   price_deviation: 0.05   # 0.05% deviation trips a push
   confidence_ratio: 200   # effectively ignore this trigger

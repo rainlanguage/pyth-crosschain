@@ -77,6 +77,15 @@ export default {
       required: false,
       default: 1,
     } as Options,
+    "price-ids-process-chunk-size": {
+      description:
+        "Maximum number of price feeds per on-chain transaction. Use a smaller value when " +
+        "pushing many feeds to avoid out-of-gas and simulation failures. Set to -1 to disable " +
+        "chunking. Default to 10",
+      type: "number",
+      required: false,
+      default: 10,
+    } as Options,
     ...options.priceConfigFile,
     ...options.priceServiceEndpoint,
     ...options.mnemonicFile,
@@ -105,6 +114,7 @@ export default {
       gasLimit,
       gasPrice,
       updateFeeMultiplier,
+      priceIdsProcessChunkSize,
       logLevel,
       controllerLogLevel,
       enableMetrics,
@@ -198,6 +208,7 @@ export default {
       gasLimit,
       gasStation,
       gasPrice,
+      priceIdsProcessChunkSize,
     );
 
     const controller = new Controller(

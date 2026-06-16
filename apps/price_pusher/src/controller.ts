@@ -1,9 +1,24 @@
 import { UnixTimestamp } from "@pythnetwork/hermes-client";
 import { DurationInSeconds, sleep } from "./utils";
 import { IPriceListener, IPricePusher } from "./interface";
-import { PriceConfig, shouldUpdate, UpdateCondition } from "./price-config";
+import {
+  analyzeFeedUpdate,
+  PriceConfig,
+  shouldUpdate,
+  UpdateCondition,
+} from "./price-config";
 import { Logger } from "pino";
 import { PricePusherMetrics } from "./metrics";
+import {
+  buildFeedStats,
+  capturePushCycleFinished,
+  capturePushCycleNoPush,
+  capturePushCycleOverrun,
+  capturePushCycleTriggered,
+  markPushCycleStarted,
+  recordPushCycleContext,
+  type FeedStalenessSummary,
+} from "./push-monitoring";
 
 export class Controller {
   private pushingFrequency: DurationInSeconds;
@@ -38,11 +53,14 @@ export class Controller {
     await sleep(this.pushingFrequency * 1000);
 
     for (;;) {
-      // We will push all prices whose update condition is YES or EARLY as long as there is
-      // at least one YES.
+      const cycleStartedAtMs = markPushCycleStarted(this.pushingFrequency);
+
+      // Push all YES or EARLY feeds when at least one feed is YES (includes .PRE / .POST as EARLY).
       let pushThresholdMet = false;
       const pricesToPush: PriceConfig[] = [];
       const pubTimesToPush: UnixTimestamp[] = [];
+      const feedSummaries: FeedStalenessSummary[] = [];
+      let missingSourceCount = 0;
 
       for (const priceConfig of this.priceConfigs) {
         const priceId = priceConfig.id;
@@ -69,12 +87,30 @@ export class Controller {
           );
         }
 
+        const feedAnalysis = analyzeFeedUpdate(
+          priceConfig,
+          sourceLatestPrice,
+          targetLatestPrice,
+        );
         const priceShouldUpdate = shouldUpdate(
           priceConfig,
           sourceLatestPrice,
           targetLatestPrice,
           this.logger,
         );
+
+        if (sourceLatestPrice === undefined) {
+          missingSourceCount += 1;
+        }
+
+        feedSummaries.push({
+          alias,
+          timeLagSec: feedAnalysis.timeLagSec,
+          condition: priceShouldUpdate,
+          blockerReason: feedAnalysis.blockerReason,
+          priceDeviationPct: feedAnalysis.priceDeviationPct,
+          confidenceRatioPct: feedAnalysis.confidenceRatioPct,
+        });
 
         // Record update condition in metrics
         if (this.metrics) {
@@ -93,7 +129,16 @@ export class Controller {
           pubTimesToPush.push((targetLatestPrice?.publishTime || 0) + 1);
         }
       }
+
+      const feedStats = buildFeedStats(feedSummaries, missingSourceCount);
+
       if (pushThresholdMet) {
+        capturePushCycleTriggered(
+          this.pushingFrequency,
+          feedStats,
+          cycleStartedAtMs,
+        );
+
         // When updates are split across multiple on-chain txs, push the most stale feeds first.
         pricesToPush.sort((a, b) => {
           const targetA = this.targetPriceListener.getLatestPriceInfo(a.id);
@@ -119,12 +164,18 @@ export class Controller {
 
         // note that the priceIds are without leading "0x"
         const priceIds = pricesToPush.map((priceConfig) => priceConfig.id);
+        const pushStartedAtMs = Date.now();
 
         try {
           await this.targetChainPricePusher.updatePriceFeed(
             priceIds,
             pubTimesToPush,
           );
+
+          capturePushCycleFinished(this.pushingFrequency, {
+            feedsToPush: priceIds.length,
+            pushDurationMs: Date.now() - pushStartedAtMs,
+          });
 
           // Record successful updates
           if (this.metrics) {
@@ -147,6 +198,12 @@ export class Controller {
             }
           }
         } catch (error) {
+          capturePushCycleFinished(this.pushingFrequency, {
+            feedsToPush: priceIds.length,
+            pushDurationMs: Date.now() - pushStartedAtMs,
+            error,
+          });
+
           this.logger.error(
             { error, priceIds },
             "Error pushing price updates to chain",
@@ -174,10 +231,29 @@ export class Controller {
           }
         }
       } else {
+        capturePushCycleNoPush(
+          this.pushingFrequency,
+          feedStats,
+          feedSummaries.length,
+        );
         this.logger.info("None of the checks were triggered. No push needed.");
       }
 
-      await sleep(this.pushingFrequency * 1000);
+      // Sleep only the remainder of pushing-frequency so a long multi-chunk push
+      // does not add a full extra interval on top of push duration (e.g. 5m push + 5m sleep = 10m).
+      const cycleElapsedMs = Date.now() - cycleStartedAtMs;
+      if (cycleElapsedMs > this.pushingFrequency * 1000) {
+        capturePushCycleOverrun(this.pushingFrequency, cycleElapsedMs);
+      }
+      const sleepMs = Math.max(
+        0,
+        this.pushingFrequency * 1000 - cycleElapsedMs,
+      );
+      if (sleepMs > 0) {
+        await sleep(sleepMs);
+      }
+
+      recordPushCycleContext(pushThresholdMet, feedStats.maxStaleSec);
     }
   }
 }

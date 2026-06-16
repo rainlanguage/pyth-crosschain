@@ -11,6 +11,11 @@ import {
   DurationInSeconds,
   removeLeading0x,
 } from "../utils";
+import {
+  capturePushChunkSkipped,
+  recordPushAttemptResult,
+  reportOnChainPushSuccess,
+} from "../push-monitoring";
 import { PythAbi } from "./pyth-abi";
 import { Logger } from "pino";
 import {
@@ -33,6 +38,90 @@ import {
 
 import { PythContract } from "./pyth-contract";
 import { SuperWalletClient } from "./super-wallet";
+
+/** Viem default is 180s. Cap wait below pushing-frequency so a stuck receipt does not block the next cycle. */
+export function getReceiptWaitTimeoutMs(): number {
+  const fromEnv = process.env.RECEIPT_WAIT_TIMEOUT_MS;
+  if (fromEnv !== undefined && fromEnv !== "") {
+    const parsed = Number(fromEnv);
+    if (!Number.isNaN(parsed) && parsed >= 30_000) {
+      return parsed;
+    }
+  }
+
+  const pushingSec = Number(process.env.PUSHING_FREQUENCY ?? "300");
+  if (!Number.isNaN(pushingSec) && pushingSec >= 30) {
+    // e.g. 300s push interval → 270s receipt wait (next cycle can start ~30s after interval)
+    return Math.floor(pushingSec * 1000 * 0.9);
+  }
+
+  return 270_000;
+}
+
+export type TxLookupAfterReceiptWaitFailure = {
+  txLookupStatus:
+    | "not_found_on_rpc"
+    | "pending_on_rpc"
+    | "mined"
+    | "lookup_failed"
+    | "unknown";
+  txLookupHint?: string;
+  blockNumber?: string;
+  receiptStatus?: string;
+  gasUsed?: string;
+  nonce?: number;
+  gasPrice?: string;
+  txLookupError?: string;
+};
+
+export async function diagnoseTxAfterReceiptWaitFailure(
+  client: SuperWalletClient,
+  hash: `0x${string}`,
+): Promise<TxLookupAfterReceiptWaitFailure> {
+  try {
+    const tx = await client.getTransaction({ hash });
+    if (tx === null) {
+      return {
+        txLookupStatus: "not_found_on_rpc",
+        txLookupHint:
+          "RPC has no record of this hash (dropped from mempool, never broadcast, or wrong chain).",
+      };
+    }
+
+    if (tx.blockNumber === null) {
+      return {
+        txLookupStatus: "pending_on_rpc",
+        txLookupHint:
+          "Transaction is still pending on the RPC; try higher gas or a dedicated Base endpoint.",
+        nonce: tx.nonce,
+        gasPrice: tx.gasPrice?.toString(),
+      };
+    }
+
+    const diagnosis: TxLookupAfterReceiptWaitFailure = {
+      txLookupStatus: "mined",
+      blockNumber: tx.blockNumber.toString(),
+    };
+
+    try {
+      const receipt = await client.getTransactionReceipt({ hash });
+      if (receipt) {
+        diagnosis.receiptStatus = receipt.status;
+        diagnosis.gasUsed = receipt.gasUsed.toString();
+      }
+    } catch {
+      // Receipt may lag slightly behind getTransaction on some RPCs.
+    }
+
+    return diagnosis;
+  } catch (lookupErr) {
+    return {
+      txLookupStatus: "lookup_failed",
+      txLookupError:
+        lookupErr instanceof Error ? lookupErr.message : String(lookupErr),
+    };
+  }
+}
 
 export class EvmPriceListener extends ChainPriceListener {
   constructor(
@@ -169,10 +258,12 @@ export class EvmPricePusher implements IPricePusher {
       ? chunkArray(pubTimesToPush, this.priceIdsProcessChunkSize)
       : [pubTimesToPush];
 
+    let chunksConfirmed = 0;
+    let chunksSkipped = 0;
+
     for (let chunkIndex = 0; chunkIndex < priceIdChunks.length; chunkIndex++) {
       const chunkPriceIds = priceIdChunks[chunkIndex];
       const chunkPubTimes = pubTimeChunks[chunkIndex];
-      const waitForReceipt = useChunking && chunkIndex < priceIdChunks.length - 1;
 
       this.logger.info(
         {
@@ -188,9 +279,104 @@ export class EvmPricePusher implements IPricePusher {
         chunkPubTimes,
       );
 
-      if (txHash !== undefined && waitForReceipt) {
-        await this.waitForTransactionReceipt(txHash);
+      if (txHash !== undefined) {
+        const confirmed = await this.waitForTransactionReceipt(txHash, {
+          priceIds: chunkPriceIds,
+          chunkIndex: chunkIndex + 1,
+          totalChunks: priceIdChunks.length,
+        });
         this.lastPushAttempt = undefined;
+        if (confirmed) {
+          chunksConfirmed += 1;
+          if (chunkIndex < priceIdChunks.length - 1) {
+            await this.refreshPublishTimesForRemainingChunks(
+              priceIdChunks.slice(chunkIndex + 1),
+              pubTimeChunks.slice(chunkIndex + 1),
+            );
+          }
+        }
+      } else {
+        chunksSkipped += 1;
+      }
+    }
+
+    recordPushAttemptResult(chunksConfirmed, chunksSkipped);
+
+    if (chunksSkipped > 0) {
+      this.logger.warn(
+        { chunksConfirmed, chunksSkipped, totalChunks: priceIdChunks.length },
+        "Some price update chunks were skipped in this cycle.",
+      );
+    }
+  }
+
+  /**
+   * Set tx gas from simulation estimate (+ headroom), capped by gas-limit.
+   * You only pay for gas used; a fixed 6M limit does not cost more but bloats the tx header.
+   */
+  private async resolveGasLimit(
+    request: Awaited<
+      ReturnType<
+        PythContract["simulate"]["updatePriceFeedsIfNecessary"]
+      >
+    >["request"],
+    maxGasCap: bigint,
+    feedCount: number,
+  ): Promise<bigint> {
+    const headroomNumerator = 125n;
+    const headroomDenominator = 100n;
+    const minGas = BigInt(Math.max(250_000, feedCount * 30_000));
+
+    try {
+      const estimated = await this.client.estimateContractGas({
+        ...request,
+        account: this.client.account,
+      });
+      let gasLimit = (estimated * headroomNumerator) / headroomDenominator;
+      if (gasLimit < minGas) {
+        gasLimit = minGas;
+      }
+      if (gasLimit > maxGasCap) {
+        gasLimit = maxGasCap;
+      }
+      this.logger.info(
+        {
+          estimatedGas: estimated.toString(),
+          gasLimit: gasLimit.toString(),
+          maxGasCap: maxGasCap.toString(),
+          feedCount,
+        },
+        "Gas limit from RPC estimate",
+      );
+      return gasLimit;
+    } catch (err) {
+      this.logger.warn(
+        { err, maxGasCap: maxGasCap.toString(), feedCount },
+        "Gas estimation failed; using max gas cap.",
+      );
+      return maxGasCap;
+    }
+  }
+
+  /** Re-read on-chain publish times after a chunk lands so later chunks avoid NoFreshUpdate. */
+  private async refreshPublishTimesForRemainingChunks(
+    priceIdChunks: string[][],
+    pubTimeChunks: UnixTimestamp[][],
+  ): Promise<void> {
+    for (let i = 0; i < priceIdChunks.length; i++) {
+      for (let j = 0; j < priceIdChunks[i].length; j++) {
+        const priceId = priceIdChunks[i][j];
+        try {
+          const priceRaw = await this.pythContract.read.getPriceUnsafe([
+            addLeading0x(priceId),
+          ]);
+          pubTimeChunks[i][j] = Number(priceRaw.publishTime) + 1;
+        } catch (err) {
+          this.logger.warn(
+            { err, priceId },
+            "Failed to refresh on-chain publish time for remaining chunk; keeping prior pubTime.",
+          );
+        }
       }
     }
   }
@@ -286,12 +472,11 @@ export class EvmPricePusher implements IPricePusher {
     };
 
     try {
-      const gasLimitToUse = this.gasLimit !== undefined
-        ? BigInt(Math.ceil(this.gasLimit))
-        : BigInt(1000000); // Default gas limit of 1M gas units
-      
-      this.logger.debug(`Using gas limit: ${gasLimitToUse}, gas price: ${gasPrice}, update fee: ${updateFee}`);
-      
+      const maxGasCap =
+        this.gasLimit !== undefined
+          ? BigInt(Math.ceil(this.gasLimit))
+          : BigInt(1_200_000);
+
       const { request } =
         await this.pythContract.simulate.updatePriceFeedsIfNecessary(
           [priceFeedUpdateDataWith0x, priceIdsWith0x, pubTimesToPushParam],
@@ -299,19 +484,32 @@ export class EvmPricePusher implements IPricePusher {
             value: updateFee,
             gasPrice: BigInt(Math.ceil(gasPrice)),
             nonce: txNonce,
-            gas: gasLimitToUse,
+            gas: maxGasCap,
           },
         );
 
-      this.logger.debug({ request }, "Simulated request successfully");
+      const gasLimitToUse = await this.resolveGasLimit(
+        request,
+        maxGasCap,
+        priceIds.length,
+      );
 
-      const hash = await this.client.writeContract(request);
+      this.logger.debug(
+        {
+          gasLimit: gasLimitToUse.toString(),
+          maxGasCap: maxGasCap.toString(),
+          gasPrice,
+          updateFee: updateFee.toString(),
+        },
+        "Simulated request successfully",
+      );
+
+      const hash = await this.client.writeContract({
+        ...request,
+        gas: gasLimitToUse,
+      });
 
       this.logger.info({ hash }, "Price update sent");
-
-      if (this.priceIdsProcessChunkSize <= 0) {
-        this.waitForTransactionReceipt(hash);
-      }
 
       return hash;
     } catch (err: any) {
@@ -328,6 +526,10 @@ export class EvmPricePusher implements IPricePusher {
           this.logger.info(
             "Simulation reverted because none of the updates are fresh. This is an expected behaviour to save gas. Skipping this push.",
           );
+          capturePushChunkSkipped("no_fresh_update", {
+            priceIds,
+            feedCount: priceIds.length,
+          });
           return undefined;
         }
 
@@ -378,6 +580,10 @@ export class EvmPricePusher implements IPricePusher {
             "The contract function execution failed in simulation. This is an expected behaviour in high frequency or multi-instance setup. " +
               "Please review this error and file an issue if it is a bug. Skipping this push.",
           );
+          capturePushChunkSkipped("simulation_reverted", {
+            priceIds,
+            feedCount: priceIds.length,
+          });
           return undefined;
         }
 
@@ -442,26 +648,112 @@ export class EvmPricePusher implements IPricePusher {
     }
   }
 
-  private async waitForTransactionReceipt(hash: `0x${string}`): Promise<void> {
+  private reportChunkPushSuccess(
+    hash: `0x${string}`,
+    receipt: { blockNumber: bigint; gasUsed: bigint; status: string },
+    context: {
+      priceIds: string[];
+      chunkIndex?: number;
+      totalChunks?: number;
+    },
+  ): void {
+    this.logger.debug({ hash, receipt }, "Price update successful");
+    this.logger.info({ hash }, "Price update successful");
+    reportOnChainPushSuccess({
+      hash,
+      blockNumber: receipt.blockNumber.toString(),
+      gasUsed: receipt.gasUsed.toString(),
+      feedCount: context.priceIds.length,
+      priceIds: context.priceIds,
+      ...(context.chunkIndex !== undefined
+        ? {
+            chunkIndex: context.chunkIndex,
+            totalChunks: context.totalChunks,
+          }
+        : {}),
+    });
+  }
+
+  private async waitForTransactionReceipt(
+    hash: `0x${string}`,
+    context: {
+      priceIds: string[];
+      chunkIndex?: number;
+      totalChunks?: number;
+    },
+  ): Promise<boolean> {
+    const receiptWaitTimeoutMs = getReceiptWaitTimeoutMs();
+
     try {
       const receipt = await this.client.waitForTransactionReceipt({
-        hash: hash,
+        hash,
+        timeout: receiptWaitTimeoutMs,
       });
 
       switch (receipt.status) {
         case "success":
-          this.logger.debug({ hash, receipt }, "Price update successful");
-          this.logger.info({ hash }, "Price update successful");
-          break;
+          this.reportChunkPushSuccess(hash, receipt, context);
+          return true;
         default:
           this.logger.info(
             { hash, receipt },
             "Price update did not succeed or its transaction did not land. " +
               "This is an expected behaviour in high frequency or multi-instance setup.",
           );
+          capturePushChunkSkipped("receipt_not_success", {
+            hash,
+            status: receipt.status,
+            receiptWaitTimeoutMs,
+            ...context,
+          });
+          return false;
       }
-    } catch (err: any) {
-      this.logger.warn({ err }, "Failed to get transaction receipt");
+    } catch (err: unknown) {
+      const diagnosis = await diagnoseTxAfterReceiptWaitFailure(
+        this.client,
+        hash,
+      );
+
+      // Wait can time out while the tx still lands; recover instead of reporting a gap.
+      if (
+        diagnosis.txLookupStatus === "mined" &&
+        diagnosis.receiptStatus === "success"
+      ) {
+        const receipt = await this.client.getTransactionReceipt({ hash });
+        if (receipt?.status === "success") {
+          this.logger.warn(
+            { hash, receiptWaitTimeoutMs, ...diagnosis },
+            "Receipt wait timed out but transaction succeeded on-chain; treating as confirmed.",
+          );
+          this.reportChunkPushSuccess(hash, receipt, context);
+          return true;
+        }
+      }
+
+      const errorName = err instanceof Error ? err.name : undefined;
+      const errorMessage = err instanceof Error ? err.message : String(err);
+
+      this.logger.warn(
+        {
+          err,
+          hash,
+          receiptWaitTimeoutMs,
+          errorName,
+          errorMessage,
+          ...diagnosis,
+        },
+        "Failed to get transaction receipt",
+      );
+
+      capturePushChunkSkipped("receipt_wait_failed", {
+        hash,
+        receiptWaitTimeoutMs,
+        errorName,
+        errorMessage,
+        ...diagnosis,
+        ...context,
+      });
+      return false;
     }
   }
 

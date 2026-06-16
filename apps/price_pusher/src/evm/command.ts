@@ -7,7 +7,7 @@ import { PythPriceListener } from "../pyth-price-listener";
 import { Controller } from "../controller";
 import { EvmPriceListener, EvmPricePusher } from "./evm";
 import { getCustomGasStation } from "./custom-gas-station";
-import pino from "pino";
+import { createLogger } from "../logger";
 import { createClient } from "./super-wallet";
 import { createPythContract } from "./pyth-contract";
 import { isWsEndpoint, filterInvalidPriceItems } from "../utils";
@@ -59,7 +59,8 @@ export default {
       default: 5,
     } as Options,
     "gas-limit": {
-      description: "Gas limit for the transaction",
+      description:
+        "Maximum gas limit per transaction. Actual gas is estimated from simulation (+25% headroom).",
       type: "number",
       required: false,
     } as Options,
@@ -121,7 +122,7 @@ export default {
       metricsPort,
     } = argv;
 
-    const logger = pino({
+    const logger = createLogger({
       level: logLevel,
     });
 
@@ -165,9 +166,9 @@ export default {
     const receivedUpdate = await pythListener.waitForFirstPriceUpdate(15000);
     
     if (receivedUpdate) {
-      console.log('Price update received!');
+      logger.info("Received first Hermes price update after startup");
     } else {
-      console.log('Timeout waiting for price update');
+      logger.warn("Timed out waiting for first Hermes price update after startup");
     }
 
     const client = await createClient(endpoint, mnemonic);

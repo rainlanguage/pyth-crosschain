@@ -50,9 +50,9 @@ export class PythPriceListener implements IPriceListener {
 
   async startListening() {
     this.logger.info(
+      { priceIds: this.priceIds },
       `Starting to listen for price updates from Hermes for ${this.priceIds.length} price feeds.`,
     );
-    console.log('Price IDs being requested:', this.priceIds);
 
     const eventSource = await this.hermesClient.getPriceUpdatesStream(
       this.priceIds,
@@ -61,7 +61,7 @@ export class PythPriceListener implements IPriceListener {
         ignoreInvalidPriceIds: true,
       },
     );
-    console.log('EventSource created, waiting for messages...');
+    this.logger.info("Hermes price stream connected, waiting for messages");
     eventSource.onmessage = (event: MessageEvent<string>) => {
       const priceUpdates = JSON.parse(event.data) as PriceUpdate;
       priceUpdates.parsed?.forEach((priceUpdate) => {
@@ -74,14 +74,25 @@ export class PythPriceListener implements IPriceListener {
         // Consider price to be currently available if it is not older than 24 hours
         const currentTime = Date.now() / 1000;
         const timeDiff = currentTime - priceUpdate.price.publish_time;
-        console.log(`Price age check: currentTime=${currentTime}, publishTime=${priceUpdate.price.publish_time}, diff=${timeDiff}s`);
-        
+        this.logger.debug(
+          {
+            priceId: priceUpdate.id,
+            currentTime,
+            publishTime: priceUpdate.price.publish_time,
+            timeDiffSeconds: timeDiff,
+          },
+          "Hermes price age check",
+        );
+
         const currentPrice =
           timeDiff > 24 * 60 * 60 // 24 hours in seconds
             ? undefined
             : priceUpdate.price;
         if (currentPrice === undefined) {
-          console.log(`Price is older than 24 hours (${timeDiff}s), skipping`);
+          this.logger.debug(
+            { priceId: priceUpdate.id, timeDiffSeconds: timeDiff },
+            "Skipping Hermes price older than 24 hours",
+          );
           return;
         }
 
@@ -97,8 +108,13 @@ export class PythPriceListener implements IPriceListener {
     };
 
     eventSource.onerror = async (error: Event) => {
-      console.error("Error receiving updates from Hermes:", error);
-      console.error("EventSource readyState:", eventSource.readyState);
+      this.logger.error(
+        {
+          readyState: eventSource.readyState,
+          eventType: error.type,
+        },
+        "Error receiving updates from Hermes",
+      );
       eventSource.close();
       await sleep(5000); // Wait a bit before trying to reconnect
       this.startListening(); // Attempt to restart the listener

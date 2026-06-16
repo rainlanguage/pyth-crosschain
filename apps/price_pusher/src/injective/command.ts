@@ -7,7 +7,7 @@ import { PythPriceListener } from "../pyth-price-listener";
 import { Controller } from "../controller";
 import { Options } from "yargs";
 import { getNetworkInfo } from "@injectivelabs/networks";
-import pino from "pino";
+import { createLogger } from "../logger";
 import { filterInvalidPriceItems } from "../utils";
 export default {
   command: "injective",
@@ -67,7 +67,7 @@ export default {
       priceIdsProcessChunkSize,
     } = argv;
 
-    const logger = pino({ level: logLevel });
+    const logger = createLogger({ level: logLevel });
 
     if (network !== "testnet" && network !== "mainnet") {
       throw new Error("Please specify network. One of [testnet, mainnet]");

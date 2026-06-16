@@ -82,6 +82,115 @@ export enum UpdateCondition {
   NO,
 }
 
+export type FeedUpdateAnalysis = {
+  condition: UpdateCondition;
+  timeLagSec: number;
+  blockerReason: string;
+  priceDeviationPct?: number;
+  confidenceRatioPct?: number;
+};
+
+export function analyzeFeedUpdate(
+  priceConfig: PriceConfig,
+  sourceLatestPrice: PriceInfo | undefined,
+  targetLatestPrice: PriceInfo | undefined,
+): FeedUpdateAnalysis {
+  if (sourceLatestPrice === undefined) {
+    return {
+      condition: UpdateCondition.NO,
+      timeLagSec: 0,
+      blockerReason: "hermes_source_unavailable",
+    };
+  }
+
+  if (targetLatestPrice === undefined) {
+    return {
+      condition: UpdateCondition.YES,
+      timeLagSec: Number.MAX_SAFE_INTEGER,
+      blockerReason: "would_trigger_yes_feed_missing_on_chain",
+    };
+  }
+
+  if (sourceLatestPrice.publishTime < targetLatestPrice.publishTime) {
+    return {
+      condition: UpdateCondition.NO,
+      timeLagSec: 0,
+      blockerReason: "hermes_publish_time_older_than_on_chain",
+    };
+  }
+
+  const timeLagSec =
+    sourceLatestPrice.publishTime - targetLatestPrice.publishTime;
+
+  const priceDeviationPct =
+    (Math.abs(
+      Number(sourceLatestPrice.price) - Number(targetLatestPrice.price),
+    ) /
+      Number(targetLatestPrice.price)) *
+    100;
+  const confidenceRatioPct = Math.abs(
+    (Number(sourceLatestPrice.conf) / Number(sourceLatestPrice.price)) * 100,
+  );
+
+  const timeMet = timeLagSec >= priceConfig.timeDifference;
+  const deviationMet = priceDeviationPct >= priceConfig.priceDeviation;
+  const confidenceMet = confidenceRatioPct >= priceConfig.confidenceRatio;
+
+  if (timeMet || deviationMet || confidenceMet) {
+    const triggers = [
+      timeMet ? `time_lag_${timeLagSec}s>=${priceConfig.timeDifference}s` : null,
+      deviationMet
+        ? `deviation_${priceDeviationPct.toFixed(4)}%>=${priceConfig.priceDeviation}%`
+        : null,
+      confidenceMet
+        ? `confidence_${confidenceRatioPct.toFixed(4)}%>=${priceConfig.confidenceRatio}%`
+        : null,
+    ].filter(Boolean);
+    return {
+      condition: UpdateCondition.YES,
+      timeLagSec,
+      blockerReason: `yes_threshold_met:${triggers.join(",")}`,
+      priceDeviationPct,
+      confidenceRatioPct,
+    };
+  }
+
+  const earlyTimeMet =
+    priceConfig.earlyUpdateTimeDifference !== undefined &&
+    timeLagSec >= priceConfig.earlyUpdateTimeDifference;
+  const earlyDeviationMet =
+    priceConfig.earlyUpdatePriceDeviation !== undefined &&
+    priceDeviationPct >= priceConfig.earlyUpdatePriceDeviation;
+  const earlyConfidenceMet =
+    priceConfig.earlyUpdateConfidenceRatio !== undefined &&
+    confidenceRatioPct >= priceConfig.earlyUpdateConfidenceRatio;
+
+  if (
+    priceConfig.customEarlyUpdate === undefined ||
+    !priceConfig.customEarlyUpdate ||
+    earlyTimeMet ||
+    earlyDeviationMet ||
+    earlyConfidenceMet
+  ) {
+    return {
+      condition: UpdateCondition.EARLY,
+      timeLagSec,
+      blockerReason:
+        "early_only_waits_for_another_feed_to_hit_yes_before_batch_push",
+      priceDeviationPct,
+      confidenceRatioPct,
+    };
+  }
+
+  return {
+    condition: UpdateCondition.NO,
+    timeLagSec,
+    blockerReason: `below_all_thresholds:time_lag_${timeLagSec}s<${priceConfig.timeDifference}s,deviation_${priceDeviationPct.toFixed(4)}%<${priceConfig.priceDeviation}%,confidence_${confidenceRatioPct.toFixed(4)}%<${priceConfig.confidenceRatio}%`,
+    priceDeviationPct,
+    confidenceRatioPct,
+  };
+}
+
 /**
  * Checks whether on-chain price needs to be updated with the latest pyth price information.
  *
@@ -95,75 +204,42 @@ export function shouldUpdate(
   logger: Logger,
 ): UpdateCondition {
   const priceId = priceConfig.id;
+  const analysis = analyzeFeedUpdate(
+    priceConfig,
+    sourceLatestPrice,
+    targetLatestPrice,
+  );
 
-  // There is no price to update the target with. So we should not update it.
   if (sourceLatestPrice === undefined) {
     logger.info(
       `${priceConfig.alias} (${priceId}) is not available on the source network. Ignoring it.`,
     );
-    return UpdateCondition.NO;
+    return analysis.condition;
   }
 
-  // It means that price never existed there. So we should push the latest price feed.
   if (targetLatestPrice === undefined) {
     logger.info(
       `${priceConfig.alias} (${priceId}) is not available on the target network. Pushing the price.`,
     );
-    return UpdateCondition.YES;
+    return analysis.condition;
   }
-
-  // The current price is not newer than the price onchain
-  if (sourceLatestPrice.publishTime < targetLatestPrice.publishTime) {
-    return UpdateCondition.NO;
-  }
-
-  const timeDifference =
-    sourceLatestPrice.publishTime - targetLatestPrice.publishTime;
-
-  const priceDeviationPct =
-    (Math.abs(
-      Number(sourceLatestPrice.price) - Number(targetLatestPrice.price),
-    ) /
-      Number(targetLatestPrice.price)) *
-    100;
-  const confidenceRatioPct = Math.abs(
-    (Number(sourceLatestPrice.conf) / Number(sourceLatestPrice.price)) * 100,
-  );
 
   logger.info(
     {
       sourcePrice: sourceLatestPrice,
       targetPrice: targetLatestPrice,
       symbol: priceConfig.alias,
+      blockerReason: analysis.blockerReason,
     },
     `Analyzing price ${priceConfig.alias} (${priceId}). ` +
-      `Time difference: ${timeDifference} (< ${priceConfig.timeDifference}? / early: < ${priceConfig.earlyUpdateTimeDifference}) OR ` +
-      `Price deviation: ${priceDeviationPct.toFixed(5)}% (< ${
+      `Time difference: ${analysis.timeLagSec} (< ${priceConfig.timeDifference}? / early: < ${priceConfig.earlyUpdateTimeDifference}) OR ` +
+      `Price deviation: ${analysis.priceDeviationPct?.toFixed(5)}% (< ${
         priceConfig.priceDeviation
       }%? / early: < ${priceConfig.earlyUpdatePriceDeviation}%?) OR ` +
-      `Confidence ratio: ${confidenceRatioPct.toFixed(5)}% (< ${
+      `Confidence ratio: ${analysis.confidenceRatioPct?.toFixed(5)}% (< ${
         priceConfig.confidenceRatio
       }%? / early: < ${priceConfig.earlyUpdateConfidenceRatio}%?)`,
   );
 
-  if (
-    timeDifference >= priceConfig.timeDifference ||
-    priceDeviationPct >= priceConfig.priceDeviation ||
-    confidenceRatioPct >= priceConfig.confidenceRatio
-  ) {
-    return UpdateCondition.YES;
-  } else if (
-    priceConfig.customEarlyUpdate === undefined ||
-    !priceConfig.customEarlyUpdate ||
-    (priceConfig.earlyUpdateTimeDifference !== undefined &&
-      timeDifference >= priceConfig.earlyUpdateTimeDifference) ||
-    (priceConfig.earlyUpdatePriceDeviation !== undefined &&
-      priceDeviationPct >= priceConfig.earlyUpdatePriceDeviation) ||
-    (priceConfig.earlyUpdateConfidenceRatio !== undefined &&
-      confidenceRatioPct >= priceConfig.earlyUpdateConfidenceRatio)
-  ) {
-    return UpdateCondition.EARLY;
-  } else {
-    return UpdateCondition.NO;
-  }
+  return analysis.condition;
 }
